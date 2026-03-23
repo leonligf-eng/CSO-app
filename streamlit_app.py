@@ -98,7 +98,7 @@ with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
     * **Effective Mins/Day:** `1440 * OEE%`
     * **Lots/Day per Tester:** `Effective Mins/Day / Sum Cycle Time`
     * **UPD (Units Per Day):** `Lots/Day per Tester * Lot Size`
-    * **Required:** `CEILING(Daily Target / Single Tester UPD)`
+    * **Required Testers:** `CEILING(Daily Target / Single Tester UPD)`
     * **Real WIP Flow:** `Single Tester UPD * (Actually Assigned Testers OR Required Testers)`
     * **Flow Logic:** FT2/FT3 Start Date is offset by the first lot completion time of the previous stage.
     """)
@@ -223,17 +223,18 @@ for i, stage in enumerate(stages):
             st.subheader(f"📍 {stage['name']} Station")
 
         
-        # --- (A) 數量連動 ---
+        # --- (A) 數量連動 (修正 Warning) ---
         if i == 0:
             ship_qty = st.number_input(f"Input Quantity (Units)", value=stage['qty'], step=1000, key=f"q_{i}")
             st.caption("(Base Input quantity configuration)")
         else:
             ship_qty = int(prev_out_qty)
             st.session_state[f"q_{i}"] = ship_qty 
-            st.number_input(f"Input Quantity (Units)", value=ship_qty, step=1000, disabled=True, key=f"q_{i}")
+            # 【修正點】: 移除 value=ship_qty，讓它直接讀取 session_state 避免衝突
+            st.number_input(f"Input Quantity (Units)", step=1000, disabled=True, key=f"q_{i}")
             st.caption(f"*(Auto-calculated: Prev Station Qty × FPY%)*")
 
-        # --- (B) 日期連動 ---
+        # --- (B) 日期連動 (修正 Warning) ---
         if i == 0:
             c1, c2 = st.columns(2)
             start_date = c1.date_input(f"Start Date", value=today, key=f"sd_{i}")
@@ -249,8 +250,9 @@ for i, stage in enumerate(stages):
             st.session_state[f"dd_{i}"] = due_date
             
             d_c1, d_c2 = st.columns(2)
-            d_c1.date_input(f"Start Date", value=start_date, disabled=True, key=f"sd_{i}")
-            d_c2.date_input(f"Due Date", value=due_date, disabled=True, key=f"dd_{i}")
+            # 【修正點】: 移除 value=...，讓它直接讀取 session_state 避免衝突
+            d_c1.date_input(f"Start Date", disabled=True, key=f"sd_{i}")
+            d_c2.date_input(f"Due Date", disabled=True, key=f"dd_{i}")
             st.caption(f"*(Auto-linked from FT{i} completion)*")
         
         working_days = max((due_date - start_date).days, 1)
@@ -425,7 +427,7 @@ df_summary_data = {
     "Input Qty": [res['ship_qty'] for res in stage_results.values()],
     "Start Date": [res['start_date'].strftime('%Y/%m/%d') for res in stage_results.values()],
     "Due Date": [res['due_date'].strftime('%Y/%m/%d') for res in stage_results.values()],
-    "OEE %": [f"{res['oee']:.2f}" for res in stage_results.values()], # 修正：強制顯示小數點後兩位 (例如 65.00)
+    "OEE %": [f"{res['oee']:.2f}" for res in stage_results.values()], 
     "Duration (Days)": [res['days'] for res in stage_results.values()],
     "Req. Testers": [res['req'] for res in stage_results.values()],
     "Assigned": [res['assigned_count'] for res in stage_results.values()],
