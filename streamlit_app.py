@@ -190,12 +190,11 @@ project_assigned_total_ids = []
 today = date.today()
 
 # --- Stations Configuration ---
-# 微調：將原生的 st.divider() 替換為自訂 hr，減少上方間距，讓卡片下方的空間收斂
 st.markdown("<hr style='margin-top: 15px; margin-bottom: 15px; border: none; border-top: 1px solid #e6e6e6;'>", unsafe_allow_html=True)
 
 input_cols = st.columns(3)
 stages = [
-    {"name": "FT1", "tt": 144.0, "fpy": 95.0, "qty": 36000},
+    {"name": "FT1", "tt": 150.0, "fpy": 95.0, "qty": 36000},
     {"name": "FT2", "tt": 25.0, "fpy": 99.9, "qty": 75000},
     {"name": "FT3", "tt": 25.0, "fpy": 99.9, "qty": 0}
 ]
@@ -223,18 +222,21 @@ for i, stage in enumerate(stages):
             st.subheader(f"📍 {stage['name']} Station")
 
         
-        # --- (A) 數量連動 (修正 Warning) ---
+        # --- (A) 數量連動 (修正：僅首次給定預設值，並開放修改) ---
         if i == 0:
             ship_qty = st.number_input(f"Input Quantity (Units)", value=stage['qty'], step=1000, key=f"q_{i}")
             st.caption("(Base Input quantity configuration)")
         else:
-            ship_qty = int(prev_out_qty)
-            st.session_state[f"q_{i}"] = ship_qty 
-            # 【修正點】: 移除 value=ship_qty，讓它直接讀取 session_state 避免衝突
-            st.number_input(f"Input Quantity (Units)", step=1000, disabled=True, key=f"q_{i}")
-            st.caption(f"*(Auto-calculated: Prev Station Qty × FPY%)*")
+            calc_qty = int(prev_out_qty)
+            # 只有初次載入時，將計算建議值寫入 Session State
+            if f"q_{i}" not in st.session_state:
+                st.session_state[f"q_{i}"] = calc_qty 
+            
+            # 開放使用者自行輸入 (並根據 Enable 狀態決定是否反灰)
+            ship_qty = st.number_input(f"Input Quantity (Units)", step=1000, disabled=not is_enabled, key=f"q_{i}")
+            st.caption(f"*(Linked Suggestion: {calc_qty:,})*")
 
-        # --- (B) 日期連動 (修正 Warning) ---
+        # --- (B) 日期連動 (修正：僅首次給定預設值，並開放修改) ---
         if i == 0:
             c1, c2 = st.columns(2)
             start_date = c1.date_input(f"Start Date", value=today, key=f"sd_{i}")
@@ -243,17 +245,20 @@ for i, stage in enumerate(stages):
             st.caption("*(Base schedule configuration)*")
         else:
             offset_days = math.ceil(prev_cycle_time / 1440)
-            start_date = prev_start + timedelta(days=offset_days)
-            due_date = global_due_date 
+            calc_start_date = prev_start + timedelta(days=offset_days)
+            calc_due_date = global_due_date 
             
-            st.session_state[f"sd_{i}"] = start_date
-            st.session_state[f"dd_{i}"] = due_date
+            # 只有初次載入時，將計算建議日期寫入 Session State
+            if f"sd_{i}" not in st.session_state:
+                st.session_state[f"sd_{i}"] = calc_start_date
+            if f"dd_{i}" not in st.session_state:
+                st.session_state[f"dd_{i}"] = calc_due_date
             
             d_c1, d_c2 = st.columns(2)
-            # 【修正點】: 移除 value=...，讓它直接讀取 session_state 避免衝突
-            d_c1.date_input(f"Start Date", disabled=True, key=f"sd_{i}")
-            d_c2.date_input(f"Due Date", disabled=True, key=f"dd_{i}")
-            st.caption(f"*(Auto-linked from FT{i} completion)*")
+            # 開放使用者自行選擇 (並根據 Enable 狀態決定是否反灰)
+            start_date = d_c1.date_input(f"Start Date", disabled=not is_enabled, key=f"sd_{i}")
+            due_date = d_c2.date_input(f"Due Date", disabled=not is_enabled, key=f"dd_{i}")
+            st.caption(f"*(Suggested Start: {calc_start_date.strftime('%m/%d')} | Due: {calc_due_date.strftime('%m/%d')})*")
         
         working_days = max((due_date - start_date).days, 1)
         daily_target_units = ship_qty / working_days
@@ -264,7 +269,7 @@ for i, stage in enumerate(stages):
             si = st.selectbox("Site", [4, 8, 16, 32], index=1, key=f"si_{i}", disabled=not is_enabled)
             tt_val = st.number_input("Test Time (s)", value=stage['tt'], key=f"tt_{i}", disabled=not is_enabled)
             fpy_val = st.number_input("FPY %", value=stage['fpy'], key=f"fy_{i}", disabled=not is_enabled)
-            oee_val = st.number_input("OEE %", value=65.0, key=f"oe_{i}", disabled=not is_enabled)
+            oee_val = st.number_input("OEE %", value=70.0, key=f"oe_{i}", disabled=not is_enabled)
         
         if is_enabled:
             prev_out_qty = ship_qty * (fpy_val / 100.0)
