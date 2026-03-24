@@ -222,24 +222,26 @@ for i, stage in enumerate(stages):
             st.subheader(f"📍 {stage['name']} Station")
 
         
-        # --- (A) 數量連動 (修正：僅首次給定預設值，並開放修改) ---
+        # --- (A) 數量連動 ---
         if i == 0:
             ship_qty = st.number_input(f"Input Quantity (Units)", value=stage['qty'], step=1000, key=f"q_{i}")
             st.caption("(Base Input quantity configuration)")
         else:
             calc_qty = int(prev_out_qty)
-            # 只有初次載入時，將計算建議值寫入 Session State
             if f"q_{i}" not in st.session_state:
                 st.session_state[f"q_{i}"] = calc_qty 
             
-            # 開放使用者自行輸入 (並根據 Enable 狀態決定是否反灰)
             ship_qty = st.number_input(f"Input Quantity (Units)", step=1000, disabled=not is_enabled, key=f"q_{i}")
             st.caption(f"*(Linked Suggestion: {calc_qty:,})*")
 
-        # --- (B) 日期連動 (修正：僅首次給定預設值，並開放修改) ---
+        # --- (B) 日期連動 ---
         if i == 0:
             c1, c2 = st.columns(2)
             start_date = c1.date_input(f"Start Date", value=today, key=f"sd_{i}")
+            
+            if f"dd_{i}" in st.session_state and st.session_state[f"dd_{i}"] < start_date:
+                st.session_state[f"dd_{i}"] = start_date
+                
             due_date = c2.date_input(f"Due Date", value=start_date + timedelta(days=6), min_value=start_date, key=f"dd_{i}")
             global_due_date = due_date 
             st.caption("*(Base schedule configuration)*")
@@ -248,16 +250,18 @@ for i, stage in enumerate(stages):
             calc_start_date = prev_start + timedelta(days=offset_days)
             calc_due_date = global_due_date 
             
-            # 只有初次載入時，將計算建議日期寫入 Session State
             if f"sd_{i}" not in st.session_state:
                 st.session_state[f"sd_{i}"] = calc_start_date
             if f"dd_{i}" not in st.session_state:
                 st.session_state[f"dd_{i}"] = calc_due_date
             
             d_c1, d_c2 = st.columns(2)
-            # 開放使用者自行選擇 (並根據 Enable 狀態決定是否反灰)
             start_date = d_c1.date_input(f"Start Date", disabled=not is_enabled, key=f"sd_{i}")
-            due_date = d_c2.date_input(f"Due Date", disabled=not is_enabled, key=f"dd_{i}")
+            
+            if st.session_state[f"dd_{i}"] < start_date:
+                st.session_state[f"dd_{i}"] = start_date
+                
+            due_date = d_c2.date_input(f"Due Date", min_value=start_date, disabled=not is_enabled, key=f"dd_{i}")
             st.caption(f"*(Suggested Start: {calc_start_date.strftime('%m/%d')} | Due: {calc_due_date.strftime('%m/%d')})*")
         
         working_days = max((due_date - start_date).days, 1)
@@ -408,19 +412,36 @@ with header_cols[3]:
     """, unsafe_allow_html=True)
 
 # ==============================================================================
-# --- Capacity Loading Analysis ---
+# --- Capacity Loading Analysis (更新：雙指標視角) ---
 # ==============================================================================
 st.divider()
 st.markdown("### 🛰️ Capacity Loading Analysis")
 
+# 計算數量
 num_project_assigned = len(project_assigned_total_ids)
-load = (num_project_assigned / net_fleet_num) * 100 if net_fleet_num > 0 else 0
+num_occupied = len(occupied_ates)
+total_used_in_plant = num_project_assigned + num_occupied
 
-if num_project_assigned > net_fleet_num:
-    st.error(f"🚨 Real-time Critical Error: Project has assigned **{num_project_assigned}** ATEs, which exceeds the Net available fleet capacity ({net_fleet_num})!")
-else:
-    st.progress(int(min(load, 100)), text=f"Planned Loading Utilization: {load:.1f}%")
-    st.markdown(f"<div style='color: #555; font-size: 13px;'>Calculation based on: {num_project_assigned} ATEs (Currently Assigned to Project) / {net_fleet_num} ATEs (Available).</div>", unsafe_allow_html=True)
+# 計算 Loading
+load_project = (num_project_assigned / net_fleet_num) * 100 if net_fleet_num > 0 else 0
+load_plant = (total_used_in_plant / total_fleet_num) * 100 if total_fleet_num > 0 else 0
+
+# 將下方 Analysis 分為左右兩欄
+col_load1, col_load2 = st.columns(2)
+
+with col_load1:
+    if num_project_assigned > net_fleet_num:
+        st.error(f"🚨 Error: Assigned ATEs ({num_project_assigned}) exceeds Net Available ({net_fleet_num})!")
+    else:
+        st.progress(int(min(load_project, 100)), text=f"📌 Project Utilization: {load_project:.1f}%")
+        st.markdown(f"<div style='color: #555; font-size: 13px;'>Calculation: {num_project_assigned} (Project) / {net_fleet_num} (Available).</div>", unsafe_allow_html=True)
+
+with col_load2:
+    if total_used_in_plant > total_fleet_num:
+        st.error(f"🚨 Error: Total In-Use ATEs ({total_used_in_plant}) exceeds Total Plant Fleet ({total_fleet_num})!")
+    else:
+        st.progress(int(min(load_plant, 100)), text=f"🏭 Total ATEs Utilization: {load_plant:.1f}%")
+        st.markdown(f"<div style='color: #555; font-size: 13px;'>Calculation: {total_used_in_plant} (Project + Occupied) / {total_fleet_num} (ATEs Pool).</div>", unsafe_allow_html=True)
 
 
 # ==============================================================================
