@@ -118,7 +118,7 @@ if ft3_key not in st.session_state: st.session_state[ft3_key] = []
 
 # --- Sidebar: Project Info ---
 st.sidebar.header("📁 Project Info")
-project_name = st.sidebar.text_input("Project Name / Code", placeholder="e.g., MBU_Project", help="Enter the project name for this capacity plan.")
+project_name = st.sidebar.text_input("Project Name / Code", placeholder="e.g., ZC13", help="Enter the project name for this capacity plan.")
 actual_project_name = project_name if project_name.strip() else "Unnamed_Project"
 st.sidebar.divider()
 
