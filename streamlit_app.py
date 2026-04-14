@@ -279,7 +279,14 @@ for i, stage in enumerate(stages):
             prev_out_qty = ship_qty * (fpy_val / 100.0)
             res = calculate_metrics(daily_target_units, ls, si, tt_val, fpy_val, oee_val)
             
-            st.info(f"📅 **{working_days} day(s)** planning interval  \n\n🎯 Target: **{int(daily_target_units):,}** units/day  \n\n🚀 Single Capacity (UPD): **{res['upd']:,}** units/day")
+            # 使用自訂的 HTML 區塊來取代 st.info，徹底解決換行自動縮排的問題
+            st.markdown(f"""
+                <div style='background-color: #eef4ff; padding: 16px; border-radius: 8px; margin-bottom: 16px; color: #004280; font-size: 14px;'>
+                    <div style='margin-bottom: 12px;'>📅 <b>{working_days} day(s)</b> planning interval</div>
+                    <div style='margin-bottom: 12px;'>🎯 Target: <b>{int(daily_target_units):,}</b> units/day</div>
+                    <div>🚀 Single Capacity (UPD): <b>{res['upd']:,}</b> units/day</div>
+                </div>
+            """, unsafe_allow_html=True)
 
             st.markdown(f"""
                 <div class='metric-card'>
