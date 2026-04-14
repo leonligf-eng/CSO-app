@@ -525,7 +525,7 @@ COLOR_OCC = "#dc3545"   # 紅色 (被佔用)
 COLOR_FT1 = "#1E3A8A"   # 深藍 (FT1)
 COLOR_FT2 = "#6f42c1"   # 紫色 (FT2)
 COLOR_FT3 = "#fd7e14"   # 橘色 (FT3)
-COLOR_NA  = "#e9ecef"   # 淺灰 (未運作/保留區)
+COLOR_NA  = "#adb5bd"   # 中灰色 (未運作/保留區) <-- 修改這裡
 
 for i in range(1, total_fleet_num + 1):
     if i not in MAP_COORDS: continue
@@ -541,7 +541,7 @@ for i in range(1, total_fleet_num + 1):
     
     if i > running_fleet_num:
         colors.append(COLOR_NA)
-        texts.append(f"<b>{i:02d}</b><br><span style='font-size:8px; color:#aaa;'>N/A</span>")
+        texts.append(f"<b>{i:02d}</b><br><span style='font-size:8px'>N/A</span>") 
         hover_texts.append(f"<b>{machine_name}</b><br>Status: Reserved / Offline")
     elif ate in st.session_state[ft1_key]:
         colors.append(COLOR_FT1)
