@@ -133,8 +133,12 @@ st.sidebar.divider()
 st.sidebar.header("🏢 Global Resources")
 
 col_res1, col_res2 = st.sidebar.columns(2)
-total_fleet_num = col_res1.number_input("Total Slots", min_value=1, value=38, help="Total physical slots in the plant (Phase 3)")
-running_fleet_num = col_res2.number_input("Running ATEs", min_value=1, value=24, help="Number of currently active testers available for assignment")
+
+# 修改 1：Total Slots 固定為 38，並加上 disabled=True 讓使用者無法更改
+total_fleet_num = col_res1.number_input("Total Slots", min_value=38, max_value=38, value=38, disabled=True, help="Total physical slots in the plant (Fixed to 38)")
+
+# 修改 2：Running ATEs 加上 max_value=38 的防呆限制 (運作機台不可能多於總槽位)
+running_fleet_num = col_res2.number_input("Running ATEs", min_value=1, max_value=38, value=24, help="Number of currently active testers available for assignment")
 
 total_ate_pool = [f"ATE{i:02d}" for i in range(1, total_fleet_num + 1)] 
 active_ate_pool = [f"ATE{i:02d}" for i in range(1, running_fleet_num + 1)] 
