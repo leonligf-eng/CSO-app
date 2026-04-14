@@ -2,13 +2,20 @@ import streamlit as st
 import math
 import pandas as pd
 from datetime import date, timedelta
+import plotly.graph_objects as go
 
 # --- Page Configuration ---
-st.set_page_config(page_title="ATE Capacity Planner", layout="wide")
+st.set_page_config(page_title="ATE Capacity Planner", layout="wide", initial_sidebar_state="expanded")
 
 # --- Custom CSS ---
 st.markdown("""
     <style>
+    /* 調整 Sidebar 寬度，讓地圖有更多空間展開 */
+    [data-testid="stSidebar"] {
+        min-width: 400px !important;
+        max-width: 450px !important;
+    }
+    
     .metric-card {
         background-color: #ffffff;
         border: 1px solid #e0e0e0;
@@ -124,13 +131,18 @@ st.sidebar.divider()
 
 # --- Sidebar: Global Resources & Occupied ATEs ---
 st.sidebar.header("🏢 Global Resources")
-total_fleet_num = st.sidebar.number_input("Total ATEs in Plant", min_value=1, value=24)
 
-total_ate_pool = [f"ATE{i:02d}" for i in range(1, total_fleet_num + 1)]
-st.sidebar.caption(f"Plant IDs: `{total_ate_pool[0]} ~ {total_ate_pool[-1]}`")
+col_res1, col_res2 = st.sidebar.columns(2)
+total_fleet_num = col_res1.number_input("Total Slots", min_value=1, value=38, help="Total physical slots in the plant (Phase 3)")
+running_fleet_num = col_res2.number_input("Running ATEs", min_value=1, value=24, help="Number of currently active testers available for assignment")
+
+total_ate_pool = [f"ATE{i:02d}" for i in range(1, total_fleet_num + 1)] 
+active_ate_pool = [f"ATE{i:02d}" for i in range(1, running_fleet_num + 1)] 
+
+st.sidebar.caption(f"Active Plant IDs: `{active_ate_pool[0]} ~ {active_ate_pool[-1]}`")
 
 for key in [occup_key, ft1_key, ft2_key, ft3_key]:
-    st.session_state[key] = [ate for ate in st.session_state[key] if ate in total_ate_pool]
+    st.session_state[key] = [ate for ate in st.session_state[key] if ate in active_ate_pool]
 
 st.sidebar.divider()
 
@@ -141,7 +153,7 @@ project_selections.extend(st.session_state[ft1_key])
 project_selections.extend(st.session_state[ft2_key])
 project_selections.extend(st.session_state[ft3_key])
 
-side_options = [ate for ate in total_ate_pool if ate not in project_selections]
+side_options = [ate for ate in active_ate_pool if ate not in project_selections]
 side_options = sorted(list(set(side_options + st.session_state[occup_key])))
 
 occupied_ates = st.sidebar.multiselect(
@@ -160,11 +172,9 @@ if occupied_ates:
             st.button(id, key=f"btn_side_{id}", on_click=remove_ate, args=(occup_key, id), type="primary")
     st.sidebar.markdown(f"<div style='color: #6c757d; font-size: 12px; margin-top: 3px;'>Count: {len(occupied_ates)} ATE excluded.</div>", unsafe_allow_html=True)
 else:
-    st.sidebar.caption("All plant ATEs available for project.")
+    st.sidebar.caption("All active plant ATEs available for project.")
 
-net_fleet_num = total_fleet_num - len(occupied_ates)
-available_for_project_pool = [ate for ate in total_ate_pool if ate not in occupied_ates]
-
+net_fleet_num = running_fleet_num - len(occupied_ates)
 st.sidebar.write(f"✅ Available ATEs for the Project: **{net_fleet_num}** ATEs")
 
 # --- Core Calculation Function ---
@@ -279,7 +289,6 @@ for i, stage in enumerate(stages):
             prev_out_qty = ship_qty * (fpy_val / 100.0)
             res = calculate_metrics(daily_target_units, ls, si, tt_val, fpy_val, oee_val)
             
-            # 使用自訂的 HTML 區塊來取代 st.info，徹底解決換行自動縮排的問題
             st.markdown(f"""
                 <div style='background-color: #eef4ff; padding: 16px; border-radius: 8px; margin-bottom: 16px; color: #004280; font-size: 14px;'>
                     <div style='margin-bottom: 12px;'>📅 <b>{working_days} day(s)</b> planning interval</div>
@@ -318,7 +327,7 @@ for i, stage in enumerate(stages):
             if k != current_ft_key: 
                 other_selections_for_this_stage.extend(st.session_state[k])
         
-        options_for_this_stage = [ate for ate in total_ate_pool if ate not in other_selections_for_this_stage]
+        options_for_this_stage = [ate for ate in active_ate_pool if ate not in other_selections_for_this_stage]
         options_for_this_stage = sorted(list(set(options_for_this_stage + st.session_state[current_ft_key])))
 
         assigned_ates = st.multiselect(
@@ -419,21 +428,19 @@ with header_cols[3]:
     """, unsafe_allow_html=True)
 
 # ==============================================================================
-# --- Capacity Loading Analysis (更新：雙指標視角) ---
+# --- Capacity Loading Analysis ---
 # ==============================================================================
 st.divider()
 st.markdown("### 🛰️ Capacity Loading Analysis")
 
-# 計算數量
 num_project_assigned = len(project_assigned_total_ids)
 num_occupied = len(occupied_ates)
 total_used_in_plant = num_project_assigned + num_occupied
 
 # 計算 Loading
 load_project = (num_project_assigned / net_fleet_num) * 100 if net_fleet_num > 0 else 0
-load_plant = (total_used_in_plant / total_fleet_num) * 100 if total_fleet_num > 0 else 0
+load_plant = (total_used_in_plant / running_fleet_num) * 100 if running_fleet_num > 0 else 0
 
-# 將下方 Analysis 分為左右兩欄
 col_load1, col_load2 = st.columns(2)
 
 with col_load1:
@@ -444,11 +451,11 @@ with col_load1:
         st.markdown(f"<div style='color: #555; font-size: 13px;'>Calculation: {num_project_assigned} (Project) / {net_fleet_num} (Available).</div>", unsafe_allow_html=True)
 
 with col_load2:
-    if total_used_in_plant > total_fleet_num:
-        st.error(f"🚨 Error: Total In-Use ATEs ({total_used_in_plant}) exceeds Total Plant Fleet ({total_fleet_num})!")
+    if total_used_in_plant > running_fleet_num:
+        st.error(f"🚨 Error: Total In-Use ATEs ({total_used_in_plant}) exceeds Total Plant Fleet ({running_fleet_num})!")
     else:
         st.progress(int(min(load_plant, 100)), text=f"🏭 Total ATEs Utilization: {load_plant:.1f}%")
-        st.markdown(f"<div style='color: #555; font-size: 13px;'>Calculation: {total_used_in_plant} (Project + Occupied) / {total_fleet_num} (ATEs Pool).</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='color: #555; font-size: 13px;'>Calculation: {total_used_in_plant} (Project + Occupied) / {running_fleet_num} (ATEs Pool).</div>", unsafe_allow_html=True)
 
 
 # ==============================================================================
@@ -481,3 +488,108 @@ st.download_button(
     mime='text/csv',
     use_container_width=True
 )
+
+# ==============================================================================
+# --- Sidebar: Dynamic Factory Layout (擬真廠區平面圖) ---
+# ==============================================================================
+st.sidebar.divider()
+st.sidebar.markdown("### 🗺️ Live Zion Area Layout (Phase 3)")
+
+fig = go.Figure()
+
+MAP_COORDS = {
+    1: (5, 12),  2: (5, 11),  3: (5, 10),  4: (5, 9),
+    5: (4, 10),  6: (4, 9),   7: (5, 2),   8: (5, 3),
+    9: (4, 2),  10: (4, 3),  11: (5, 5),  12: (5, 6),
+    13: (4, 5), 14: (4, 6),  15: (5, 7),  16: (4, 7),
+    17: (3, 10), 18: (3, 9),  19: (3, 2),  20: (3, 3),
+    21: (2, 5),  22: (2, 6),  23: (3, 5),  24: (3, 6),
+    25: (3, 7),  26: (2, 10), 27: (4, 11), 28: (3, 11),
+    29: (1, 9),  30: (0, 9),  31: (2, 7),  32: (4, 12),
+    33: (2, 2),  34: (2, 3),  35: (1, 2),  36: (1, 3),
+    37: (-1, 9), 38: (-2, 9)
+}
+
+fig.add_shape(type="rect", x0=-2.5, y0=1.5, x1=5.5, y1=12.5,
+              fillcolor="#f8f9fa", line=dict(color="#e9ecef", width=1), layer="below")
+
+x_coords, y_coords, colors, texts, hover_texts = [], [], [], [], []
+
+# 定義狀態顏色
+COLOR_AVL = "#28a745"   # 綠色 (可用)
+COLOR_OCC = "#dc3545"   # 紅色 (被佔用)
+COLOR_FT1 = "#1E3A8A"   # 深藍 (FT1)
+COLOR_FT2 = "#6f42c1"   # 紫色 (FT2)
+COLOR_FT3 = "#fd7e14"   # 橘色 (FT3)
+COLOR_NA  = "#e9ecef"   # 淺灰 (未運作/保留區)
+
+for i in range(1, total_fleet_num + 1):
+    if i not in MAP_COORDS: continue
+    
+    ate = f"ATE{i:02d}"
+    x, y = MAP_COORDS[i]
+    x_coords.append(x)
+    y_coords.append(y)
+    
+    machine_name = f"93K_{i:02d}"
+    if i <= 24:
+        machine_name += f" (EXA{i:02d})"
+    
+    if i > running_fleet_num:
+        colors.append(COLOR_NA)
+        texts.append(f"<b>{i:02d}</b><br><span style='font-size:8px; color:#aaa;'>N/A</span>")
+        hover_texts.append(f"<b>{machine_name}</b><br>Status: Reserved / Offline")
+    elif ate in st.session_state[ft1_key]:
+        colors.append(COLOR_FT1)
+        texts.append(f"<b>{i:02d}</b><br><span style='font-size:8px'>FT1</span>")
+        hover_texts.append(f"<b>{machine_name}</b><br>Status: Assigned to FT1")
+    elif ate in st.session_state[ft2_key]:
+        colors.append(COLOR_FT2)
+        texts.append(f"<b>{i:02d}</b><br><span style='font-size:8px'>FT2</span>")
+        hover_texts.append(f"<b>{machine_name}</b><br>Status: Assigned to FT2")
+    elif ate in st.session_state[ft3_key]:
+        colors.append(COLOR_FT3)
+        texts.append(f"<b>{i:02d}</b><br><span style='font-size:8px'>FT3</span>")
+        hover_texts.append(f"<b>{machine_name}</b><br>Status: Assigned to FT3")
+    elif ate in occupied_ates:
+        colors.append(COLOR_OCC)
+        texts.append(f"<b>{i:02d}</b><br><span style='font-size:8px'>OCC</span>")
+        hover_texts.append(f"<b>{machine_name}</b><br>Status: Occupied (Other Project)")
+    else:
+        colors.append(COLOR_AVL)
+        texts.append(f"<b>{i:02d}</b><br><span style='font-size:8px'>AVL</span>")
+        hover_texts.append(f"<b>{machine_name}</b><br>Status: Available (Idle)")
+
+fig.add_trace(go.Scatter(
+    x=x_coords, y=y_coords, mode='markers+text',
+    marker=dict(symbol='square', size=38, color=colors, line=dict(width=1, color="white")),
+    text=texts,
+    textposition="middle center",
+    textfont=dict(color="white", size=11, family="Arial"),
+    hoverinfo="text",
+    hovertext=hover_texts
+))
+
+fig.update_layout(
+    xaxis=dict(visible=False, range=[-3, 6]),
+    yaxis=dict(visible=False, range=[1, 13]),
+    margin=dict(l=0, r=0, t=0, b=0),
+    height=480, 
+    plot_bgcolor="rgba(0,0,0,0)",
+    paper_bgcolor="rgba(0,0,0,0)",
+    showlegend=False,
+    dragmode=False 
+)
+
+st.sidebar.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+st.sidebar.markdown(f"""
+<div style='display: flex; flex-wrap: wrap; gap: 10px; font-size: 14px; color: #444; margin-top: -10px; margin-left: 40px;'>
+    <div style='width: 45%;'><span style='color:{COLOR_AVL}; font-size: 16px;'>■</span> Available</div>
+    <div style='width: 45%;'><span style='color:{COLOR_OCC}; font-size: 16px;'>■</span> Occupied</div>
+    <div style='width: 45%;'><span style='color:{COLOR_FT1}; font-size: 16px;'>■</span> FT1 Assigned</div>
+    <div style='width: 45%;'><span style='color:{COLOR_FT2}; font-size: 16px;'>■</span> FT2 Assigned</div>
+    <div style='width: 45%;'><span style='color:{COLOR_FT3}; font-size: 16px;'>■</span> FT3 Assigned</div>
+    <div style='width: 45%;'><span style='color:{COLOR_NA}; font-size: 16px;'>■</span> N/A / Offline</div>
+</div>
+""", unsafe_allow_html=True)
