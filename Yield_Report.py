@@ -117,32 +117,33 @@ filter_col1, filter_col2 = st.columns([1, 2])
 
 with filter_col1:
     op_options = sorted(raw_df['OpNo'].dropna().unique().tolist())
-    selected_ops = st.multiselect("Select Operation (OpNo)", options=op_options)
+    selected_ops = st.multiselect("Select Operation (OpNo)", options=op_options, key="op_select")
 
 filtered_by_op = raw_df[raw_df['OpNo'].isin(selected_ops)] if selected_ops else raw_df
 prog_options = sorted(filtered_by_op['ProgramName'].dropna().unique().tolist())
 
-# 🌟 核心修正 1：加入 Session State 記憶功能，確保更換 OpNo 時，已選的 Program 不會被清空
+# 🌟 核心修正 2：使用 Callback 避免閃爍 Bug
 if 'saved_progs' not in st.session_state:
     st.session_state.saved_progs = []
 
-# 過濾出在當前 prog_options 裡仍然有效的已選項，作為預設值
+def update_progs():
+    st.session_state.saved_progs = st.session_state.prog_select_widget
+
 valid_defaults = [p for p in st.session_state.saved_progs if p in prog_options]
 
 with filter_col2:
-    selected_progs = st.multiselect("Select Program (ProgramName)", options=prog_options, default=valid_defaults)
-
-# 即時將當前的選擇存回 Session State
-st.session_state.saved_progs = selected_progs
-
-if not selected_ops or not selected_progs:
-    st.info("👆 Please select **OpNo** and **ProgramName** above to generate the report.")
-    st.stop()
+    selected_progs = st.multiselect(
+        "Select Program (ProgramName)", 
+        options=prog_options, 
+        default=valid_defaults,
+        key="prog_select_widget",
+        on_change=update_progs
+    )
 
 st.divider()
 
 # ==============================================================================
-# --- 2. Sidebar Settings (Dynamic Targets per OpNo) ---
+# --- 2. Sidebar Settings (🌟 核心修正 1：移至 st.stop 之前，確保不會消失) ---
 # ==============================================================================
 st.sidebar.header("⚙️ Data Cleaning Rules")
 min_lot_size = st.sidebar.number_input("Exclude Lots smaller than (Qty)", value=0, step=100)
@@ -152,12 +153,18 @@ st.sidebar.header("📐 Planning & Targets")
 st.sidebar.caption("Define specific baselines for EACH selected operation.")
 
 targets = {}
-for op in selected_ops:
-    st.sidebar.markdown(f"**🔹 Operation: {op}**")
-    theo = st.sidebar.number_input(f"Theo Max UPD ({op})", value=20000, step=500, key=f"theo_{op}")
-    plan = st.sidebar.number_input(f"Planned Target ({op})", value=18000, step=500, key=f"plan_{op}")
-    targets[op] = {'theo': theo, 'plan': plan}
-    st.sidebar.write("") 
+if selected_ops:
+    for op in selected_ops:
+        st.sidebar.markdown(f"**🔹 Operation: {op}**")
+        theo = st.sidebar.number_input(f"Theo Max UPD ({op})", value=20000, step=500, key=f"theo_{op}")
+        plan = st.sidebar.number_input(f"Planned Target ({op})", value=18000, step=500, key=f"plan_{op}")
+        targets[op] = {'theo': theo, 'plan': plan}
+        st.sidebar.write("") 
+
+# 防呆檢查移至此處，確保側邊欄先渲染完畢
+if not selected_ops or not selected_progs:
+    st.info("👆 Please select **OpNo** and **ProgramName** above to generate the report.")
+    st.stop()
 
 # ==============================================================================
 # --- 3. Data Processing Engine ---
@@ -202,12 +209,11 @@ tester_summary['Avg_OEE'] = tester_summary['Avg_Gross_UPD'] / tester_summary['Th
 tester_summary = tester_summary.sort_values(by=['OpNo', 'Tester'], ascending=True)
 
 # ==============================================================================
-# --- 4. Dashboard UI (Tabs fully isolating operations) ---
+# --- 4. Dashboard UI ---
 # ==============================================================================
 st.markdown("## ATE Tester Capacity Analysis & Validation")
 st.caption("Select an Operation tab below to view its isolated performance and capacity planning insights.")
 
-# 🌟 核心修正 2：建立多站點頁籤，並將 Overall Performance 全部移入頁籤內部
 tabs = st.tabs(selected_ops)
 
 for idx, op in enumerate(selected_ops):
