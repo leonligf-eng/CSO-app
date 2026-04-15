@@ -117,7 +117,7 @@ def split_cross_day_lots(df, cutoff_time):
             new_rows.append(row_dict)
         else:
             # 發生跨日！精準計算第一天與第二天的秒數比例
-            boundary_time = pd.Timestamp(datetime.datetime.combine(end_date, cutoff_time))
+            boundary_time = pd.Timestamp(datetime.combine(end_date, cutoff_time))
             if boundary_time < in_time: 
                 boundary_time += pd.Timedelta(days=1)
                 
@@ -141,8 +141,9 @@ def split_cross_day_lots(df, cutoff_time):
             
     return pd.DataFrame(new_rows)
 
-# 執行跨日拆分
-df_split = split_cross_day_lots(raw_df, cutoff_hour)
+# 🌟 修復 1：將整數轉換為 datetime.time 物件再傳入函數
+cutoff_time_obj = time(cutoff_hour, 0)
+df_split = split_cross_day_lots(raw_df, cutoff_time_obj)
 
 # 定義 Build 順序以利圖表排序
 build_order = ["P1.0", "P1.1", "EVT1.0(A0)", "EVT1.0(B0)", "EVT1.1", "DVT", "PVT", "MP"]
@@ -157,7 +158,8 @@ if 'ProgramName' in df_split.columns:
 st.markdown("### 📊 Overall Performance")
 
 # --- KPI Cards ---
-total_input = int(df_split['AllocatedQty'].sum())
+# 🌟 修復 2：將 AllocatedQty 改為 ApportionedQty
+total_input = int(df_split['ApportionedQty'].sum())
 total_pass = int(raw_df['PassQty'].sum())  # Pass Qty usually tracked by complete lot
 overall_yield = (total_pass / raw_df['TestQty'].sum()) * 100 if raw_df['TestQty'].sum() > 0 else 0
 active_testers = raw_df['Tester'].nunique()
@@ -180,8 +182,9 @@ col1, col2 = st.columns(2)
 with col1:
     st.markdown("#### 📅 Daily Output (UPD) by Tester")
     st.caption(f"Based on Cutoff Time: {cutoff_hour:02d}:00")
-    daily_upd = df_split.groupby(['ProdDate', 'Tester'])['AllocatedQty'].sum().reset_index()
-    fig1 = px.bar(daily_upd, x='ProdDate', y='AllocatedQty', color='Tester', 
+    # 🌟 修復 3：同步欄位名稱 (ProductionDate, ApportionedQty)
+    daily_upd = df_split.groupby(['ProductionDate', 'Tester'])['ApportionedQty'].sum().reset_index()
+    fig1 = px.bar(daily_upd, x='ProductionDate', y='ApportionedQty', color='Tester', 
                   title="Daily Output Trend", barmode='stack')
     fig1.update_layout(xaxis_title="Production Date", yaxis_title="Units Tested")
     st.plotly_chart(fig1, use_container_width=True)
@@ -207,8 +210,9 @@ col3, col4 = st.columns(2)
 
 with col3:
     st.markdown("#### 🤖 Tester Workload Distribution")
-    tester_load = df_split.groupby(['Tester', 'ProgramName'])['AllocatedQty'].sum().reset_index()
-    fig3 = px.bar(tester_load, y='Tester', x='AllocatedQty', color='ProgramName', 
+    # 🌟 修復 4：同步欄位名稱 ApportionedQty
+    tester_load = df_split.groupby(['Tester', 'ProgramName'])['ApportionedQty'].sum().reset_index()
+    fig3 = px.bar(tester_load, y='Tester', x='ApportionedQty', color='ProgramName', 
                   orientation='h', title="Units Tested by ATE & Build")
     st.plotly_chart(fig3, use_container_width=True)
 
@@ -224,4 +228,5 @@ with col4:
 
 # --- Raw Data Expander ---
 with st.expander("🔍 View Raw Proportional Splitting Data"):
-    st.dataframe(df_split[['LotID', 'Tester', 'ProdDate', 'ProgramName', 'AllocatedQty', 'CheckInTime', 'CheckOutTime']].sort_values(by=['CheckInTime']))
+    # 🌟 修復 5：同步表格底下的顯示欄位名稱
+    st.dataframe(df_split[['LotID', 'Tester', 'ProductionDate', 'ProgramName', 'ApportionedQty', 'CheckInTime', 'CheckOutTime']].sort_values(by=['CheckInTime']))
