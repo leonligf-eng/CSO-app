@@ -57,7 +57,7 @@ def generate_mock_data():
         
         data.append([f"LOT_{i:04d}", op, prog, tester, start_time, end_time, qty, pass_qty])
         
-    return pd.DataFrame(data, columns=['LotID', 'OpNo', 'ProgramName', 'Tester', 'CheckInTime', 'CheckOutTime', 'TestQty', 'PassQty'])
+    return pd.DataFrame(data, columns=['LotNo', 'OpNo', 'ProgramName', 'Tester', 'CheckInTime', 'CheckOutTime', 'TestQty', 'PassQty'])
 
 def load_data(file):
     if file is not None:
@@ -179,7 +179,7 @@ if df_split.empty:
 st.markdown("### 📊 Overall Performance")
 
 # 確保 PassQty 與 TestQty 抓取的是不重複的批次，避免跨日切割造成的重複計算
-unique_lots = filtered_df.drop_duplicates(subset=['LotID'])
+unique_lots = filtered_df.drop_duplicates(subset=['LotNo'])
 total_upd = int(df_split['ApportionedQty'].sum())
 total_pass = int(unique_lots['PassQty'].sum())
 total_test = int(unique_lots['TestQty'].sum())
@@ -213,7 +213,7 @@ tester_summary = daily_stats.groupby('Tester').agg(
 ).reset_index()
 
 tester_summary['Avg_UPW'] = tester_summary['Avg_UPD'] * 7
-lot_counts = filtered_df.groupby('Tester')['LotID'].nunique().reset_index().rename(columns={'LotID': 'Lots'})
+lot_counts = filtered_df.groupby('Tester')['LotNo'].nunique().reset_index().rename(columns={'LotNo': 'Lots'})
 tester_summary = tester_summary.merge(lot_counts, on='Tester', how='left')
 tester_summary = tester_summary.sort_values(by='Avg_UPD', ascending=False)
 
