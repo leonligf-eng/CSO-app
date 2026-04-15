@@ -18,7 +18,6 @@ st.markdown("""
     .insight-box { background-color: #e8f4f8; border-left: 5px solid #17a2b8; padding: 15px 20px; border-radius: 4px; margin-bottom: 20px; font-size: 15px; line-height: 1.6; color: #333;}
     .insight-highlight { font-weight: bold; color: #0c5460; }
     
-    /* 🌟 修改 Multiselect 標籤顏色 (移除預設紅色，改為淺藍系) */
     .stMultiSelect [data-baseweb="tag"] { 
         max-width: 100% !important; 
         background-color: #e6f2ff !important;
@@ -87,7 +86,8 @@ def load_data(file):
             return None
     return generate_mock_data()
 
-uploaded_file = st.sidebar.file_uploader("Upload Yield Report (Excel)", type=["xlsx", "xls"])
+# 支援 ODS 與 Excel 格式上傳
+uploaded_file = st.sidebar.file_uploader("Upload Yield Report", type=["xlsx", "xls", "ods"])
 raw_df = load_data(uploaded_file)
 
 if raw_df is None or raw_df.empty:
@@ -97,13 +97,13 @@ if raw_df is None or raw_df.empty:
 # ==============================================================================
 # --- 1. Main Area: Filters & Help Section ---
 # ==============================================================================
-# 🌟 修改 Help 標題為純英文
 with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
     st.markdown("""
     This system employs rigorous Industrial Engineering (IE) logic combined with actual production report data to calculate authentic equipment efficiency. Metric definitions are as follows:
 
     #### 1. Capacity Metrics (Tester View vs. Product View)
     * **Total Insertions (Gross):** Total testing actions performed by the testers across all operations. It evaluates the physical workload on the testers (allows double-counting across ops).
+    * **Est. Physical Units:** Estimated actual ICs processed, calculated by de-duplicating `LotNo` and taking the max input quantity across operations.
     * **Active Days:** The exact number of hours a tester spent in the "Testing" state (CheckIn to CheckOut), divided by 24 hours.
     * **Gross UPD (Prorated 24h Rate):** Calculated as `Total TestQty / Active Days`. 
       * *Note on Proration:* This is a **SPEED metric**, not a volume metric. If a tester tests 6,000 units in exactly 12 hours, its 24-hour prorated UPD is 12,000 ea/day.
@@ -119,7 +119,7 @@ with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
     * **Q (Quality):** Testing quality.
       * `Calculation = Total PassQty / Total TestQty`
     * **Overall OEE:**
-      * `Calculation = Avg Actual Gross UPD / Theoretical Max UPD`. (Mathematically equivalent to A × P)
+      * `Calculation = Availability (A) × Performance (P)`
 
     #### 3. Capacity Planning Metrics
     * **Planned Target UPD:** The safety scheduling baseline preset by Planning or Engineering, defined specifically per operation.
@@ -169,7 +169,6 @@ targets = {}
 if selected_ops:
     for op in selected_ops:
         st.sidebar.markdown(f"**🔹 Operation: {op}**")
-        # 🌟 修改預設值為 4240 與 2800
         theo = st.sidebar.number_input(f"Theo Max UPD ({op})", value=4240, step=10, key=f"theo_{op}")
         plan = st.sidebar.number_input(f"Planned Target ({op})", value=2800, step=100, key=f"plan_{op}")
         targets[op] = {'theo': theo, 'plan': plan}
@@ -217,7 +216,9 @@ tester_summary['Actual_UPH'] = np.where(tester_summary['Total_Duration_Hr'] > 0,
 tester_summary['Performance (P)'] = tester_summary['Actual_UPH'] / (tester_summary['Theo_Max_UPD'] / 24.0)
 
 tester_summary['Yield (Q)'] = np.where(tester_summary['Total_TestQty'] > 0, tester_summary['Total_PassQty'] / tester_summary['Total_TestQty'], 0)
-tester_summary['Avg_OEE'] = tester_summary['Avg_Gross_UPD'] / tester_summary['Theo_Max_UPD']
+
+# 🌟 核心修正：將 OEE 邏輯修復為傳統的 A * P，以真實反映設備綜合稼動效率
+tester_summary['Avg_OEE'] = tester_summary['Availability (A)'] * tester_summary['Performance (P)']
 
 tester_summary = tester_summary.sort_values(by=['OpNo', 'Tester'], ascending=True)
 
@@ -251,7 +252,6 @@ for idx, op in enumerate(selected_ops):
         active_testers = op_summary['Tester'].nunique()
 
         c1, c2, c3, c4 = st.columns(4)
-        # 🌟 簡化 KPI 卡片，移除小灰字以提升對比與整潔度
         with c1: 
             st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Total Insertions (Gross)</div><div class='kpi-value'>{total_insertions:,}</div></div>", unsafe_allow_html=True)
         with c2: 
@@ -273,8 +273,10 @@ for idx, op in enumerate(selected_ops):
         global_gross_upd = (total_insertions / total_op_days) if total_op_days > 0 else 0
         global_net_upd = (total_pass_insertions / total_op_days) if total_op_days > 0 else 0
         
+        # 🌟 核心修正：全域 OEE 的分母必須使用 Calendar Span，才能真實反映設備綜合效率
         op_theo_val = targets[op]['theo']
-        global_theo_qty = total_op_days * op_theo_val
+        total_calendar_days = op_summary['Calendar_Span_Days'].sum()
+        global_theo_qty = total_calendar_days * op_theo_val
         global_oee = (total_insertions / global_theo_qty) * 100 if global_theo_qty > 0 else 0
 
         sc1, sc2, sc3 = st.columns(3)
@@ -338,7 +340,6 @@ for idx, op in enumerate(selected_ops):
         display_df['Availability (A)'] = display_df['Availability (A)'].apply(lambda x: f"{x*100:.1f}%")
         display_df['Performance (P)'] = display_df['Performance (P)'].apply(lambda x: f"{x*100:.1f}%")
 
-        # 🌟 新增：針對低於預期的 OEE 進行標示 (紅色字體與淺紅背景)
         def highlight_low_oee(val, threshold):
             try:
                 num_val = float(val.strip('%'))
