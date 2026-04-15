@@ -81,48 +81,65 @@ if raw_df is None or raw_df.empty:
 # ==============================================================================
 # --- 2. Data Preprocessing & Proportional UPD Logic ---
 # ==============================================================================
-def split_cross_day_lots(df, cutoff_hour):
-    """將跨日的 Lot 依據時間比例拆分成多筆紀錄"""
-    split_records = []
+# (Req 1) 跨日時間比例切割演算法
+def split_cross_day_lots(df, cutoff_time):
+    # 🌟 防呆：強制移除 Excel 中可能重複的欄位名稱
+    df = df.loc[:, ~df.columns.duplicated()]
+    
+    # 過濾掉沒有時間或數量的異常資料
+    df = df.dropna(subset=['CheckInTime', 'CheckOutTime', 'TestQty']).copy()
+    
+    cutoff_hour = cutoff_time.hour
+    cutoff_minute = cutoff_time.minute
+    
+    new_rows = []
     
     for _, row in df.iterrows():
-        start = row['CheckInTime']
-        end = row['CheckOutTime']
-        if pd.isnull(start) or pd.isnull(end) or start >= end:
-            continue
-            
-        total_seconds = (end - start).total_seconds()
+        in_time = row['CheckInTime']
+        out_time = row['CheckOutTime']
         qty = row['TestQty']
         
-        # 進行時間平移，讓邏輯計算簡化為"午夜換日"
-        # 例如 cutoff 是 8am，就把所有時間往前推 8 小時，這樣 08:00 就會變成 00:00 (換日點)
-        shifted_start = start - timedelta(hours=cutoff_hour)
-        shifted_end = end - timedelta(hours=cutoff_hour)
+        shift_in_time = in_time - pd.Timedelta(hours=cutoff_hour, minutes=cutoff_minute)
+        shift_out_time = out_time - pd.Timedelta(hours=cutoff_hour, minutes=cutoff_minute)
         
-        current_shifted = shifted_start
-        while current_shifted < shifted_end:
-            # 找出今天的結束時間 (當天 23:59:59 的下一秒，也就是隔天 00:00:00)
-            next_day_shifted = (current_shifted + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        start_date = shift_in_time.date()
+        end_date = shift_out_time.date()
+        
+        total_seconds = (out_time - in_time).total_seconds()
+        
+        # 🌟 改用 to_dict()，避開 Pandas Series 複製時的標籤衝突，且處理速度更快
+        row_dict = row.to_dict()
+        
+        if start_date == end_date or total_seconds <= 0:
+            # 沒有跨日，直接歸屬
+            row_dict['ProductionDate'] = start_date
+            row_dict['ApportionedQty'] = qty
+            new_rows.append(row_dict)
+        else:
+            # 發生跨日！精準計算第一天與第二天的秒數比例
+            boundary_time = pd.Timestamp(datetime.datetime.combine(end_date, cutoff_time))
+            if boundary_time < in_time: 
+                boundary_time += pd.Timedelta(days=1)
+                
+            sec_day1 = (boundary_time - in_time).total_seconds()
+            sec_day2 = (out_time - boundary_time).total_seconds()
             
-            # 這一段時間的結束點
-            segment_end_shifted = min(shifted_end, next_day_shifted)
+            ratio_day1 = sec_day1 / total_seconds
+            ratio_day2 = sec_day2 / total_seconds
             
-            # 計算這一段時間佔總時間的比例
-            segment_seconds = (segment_end_shifted - current_shifted).total_seconds()
-            ratio = segment_seconds / total_seconds if total_seconds > 0 else 0
-            segment_qty = qty * ratio
+            # 建立第一天的紀錄
+            row1 = row_dict.copy()
+            row1['ProductionDate'] = start_date
+            row1['ApportionedQty'] = qty * ratio_day1
+            new_rows.append(row1)
             
-            # 還原為真實日期標籤 (Production Date)
-            prod_date = current_shifted.date()
+            # 建立第二天的紀錄
+            row2 = row_dict.copy()
+            row2['ProductionDate'] = end_date
+            row2['ApportionedQty'] = qty * ratio_day2
+            new_rows.append(row2)
             
-            new_row = row.copy()
-            new_row['ProdDate'] = prod_date
-            new_row['AllocatedQty'] = segment_qty
-            split_records.append(new_row)
-            
-            current_shifted = next_day_shifted
-            
-    return pd.DataFrame(split_records)
+    return pd.DataFrame(new_rows)
 
 # 執行跨日拆分
 df_split = split_cross_day_lots(raw_df, cutoff_hour)

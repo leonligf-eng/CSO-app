@@ -170,7 +170,22 @@ with tabs[1]:
     
     col_p1, col_p2 = st.columns(2)
     with col_p1:
-        fig_phase_pie = px.pie(phase_data, values='TestQty', names='BuildPhase', title="各 Build 測試總量佔比", hole=0.4)
+        # 改用 px.sunburst 來製作內外雙層圖表
+        fig_phase_pie = px.sunburst(
+            df_report, 
+            path=['BuildPhase', 'Tester'],  # 設定階層：內圈是 BuildPhase -> 外圈是 Tester
+            values='TestQty',               # 扇形大小依照測試數量 (TestQty) 決定
+            color='BuildPhase',             # 讓同一個 BuildPhase 的外圈機台保持同色系
+            title="各 Build 與機台測試總量分佈 (內外層)"
+        )
+        
+        # 微調圖表外觀：顯示標籤與數值，並加上白邊讓層次更分明
+        fig_phase_pie.update_traces(
+            textinfo="label+percent parent", 
+            marker=dict(line=dict(color='#ffffff', width=1.5))
+        )
+        fig_phase_pie.update_layout(margin=dict(t=40, l=0, r=0, b=0)) # 減少邊距讓圖大一點
+        
         st.plotly_chart(fig_phase_pie, use_container_width=True)
     with col_p2:
         fig_phase_yield = px.bar(phase_data, x='BuildPhase', y='Yield', title="各 Build 平均良率", color='Yield', 
