@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.express as px
 from datetime import datetime, timedelta, time
 
 st.set_page_config(page_title="ATE Tester Capacity Analysis", layout="wide")
@@ -30,17 +31,17 @@ def generate_mock_data():
     np.random.seed(42)
     now = datetime.now()
     data = []
-    testers = [f"HP93K-EXA{i:02d}" for i in range(2, 17)]
+    testers = [f"HP93K-EXA{i:02d}" for i in range(2, 10)]
     tester_clocks = {tester: now - timedelta(days=20) for tester in testers}
     
-    for i in range(200):
+    for i in range(150):
         tester = np.random.choice(testers)
         wait_time = timedelta(hours=np.random.uniform(0.5, 3))
         start_time = tester_clocks[tester] + wait_time
         test_duration = timedelta(hours=np.random.uniform(6, 14))
         end_time = start_time + test_duration
-        qty = np.random.randint(1500, 3500)
-        yield_rate = np.random.uniform(0.90, 0.99)
+        qty = np.random.randint(5000, 15000)
+        yield_rate = np.random.uniform(0.95, 0.99)
         pass_qty = int(qty * yield_rate)
         
         data.append([f"LOT_{i:04d}", "FT1", "PROD_GS631_ZC13...", tester, start_time, end_time, qty, pass_qty])
@@ -76,18 +77,19 @@ if raw_df is None or raw_df.empty:
 
 st.sidebar.divider()
 st.sidebar.header("⚙️ 2. Data Cleaning Rules")
-min_lot_size = st.sidebar.number_input("Exclude Lots smaller than (Qty)", value=500, step=100)
+min_lot_size = st.sidebar.number_input("Exclude Lots smaller than (Qty)", value=0, step=100)
 
 st.sidebar.divider()
 st.sidebar.header("📐 3. Planning & Targets")
 st.sidebar.caption("Define baselines for Capacity Planning.")
-theo_max_upd = st.sidebar.number_input("Theoretical Max UPD (100% OEE)", value=4240, step=10)
-planned_upd = st.sidebar.number_input("Planned Target UPD", value=2800, step=100)
+theo_max_upd = st.sidebar.number_input("Theoretical Max UPD (100% OEE)", value=20000, step=500)
+planned_upd = st.sidebar.number_input("Planned Target UPD", value=19000, step=500)
 
 # ==============================================================================
 # --- 2. Main Area: Help Section & Filters ---
 # ==============================================================================
 
+# 🌟 完整恢復：最詳盡的 A/P/Q 定義與公式說明
 with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
     st.markdown("""
     This system employs rigorous Industrial Engineering (IE) logic combined with actual production report data to calculate authentic equipment efficiency. Metric definitions are as follows:
@@ -112,7 +114,7 @@ with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
       * `Calculation = Avg Actual Gross UPD / Theoretical Max UPD`. (Mathematically equivalent to A × P)
 
     #### 3. Capacity Planning Metrics
-    * **Planned Target UPD:** The safety scheduling baseline preset by Planning or Engineering (e.g., 2,800 ea/day).
+    * **Planned Target UPD:** The safety scheduling baseline preset by Planning or Engineering.
     * **Implied OEE:** The ratio of the Planned Target against the 100% theoretical capacity. `Calculation = Planned Target UPD / Theoretical Max UPD`. This reflects the built-in buffer percentage reserved for setups, maintenance, and re-tests.
     """)
 
@@ -178,6 +180,9 @@ tester_summary = tester_summary.sort_values(by='Tester', ascending=True)
 # --- 4. Dashboard UI ---
 # ==============================================================================
 
+# ---------------------------------------------------------
+# Part A: Overall Performance
+# ---------------------------------------------------------
 st.markdown("### 📊 Overall Performance")
 total_test = int(tester_summary['Total_TestQty'].sum())
 total_pass = int(tester_summary['Total_PassQty'].sum())
@@ -193,6 +198,9 @@ with c4: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Active Teste
 
 st.divider()
 
+# ---------------------------------------------------------
+# Part B: Period Performance Summary
+# ---------------------------------------------------------
 st.markdown("## ATE Tester Capacity Analysis & Validation")
 avg_gross_upd = tester_summary['Avg_Gross_UPD'].mean()
 avg_net_upd = tester_summary['Avg_Net_UPD'].mean()
@@ -206,54 +214,85 @@ with sc1: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg
 with sc2: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Effective UPD (PassQty)</div><div class='summary-value'>{avg_net_upd:,.0f}</div></div>", unsafe_allow_html=True)
 with sc3: st.markdown(f"<div class='summary-card'><div class='summary-title'>Overall OEE</div><div class='summary-value'>{avg_oee:.1f}%</div></div>", unsafe_allow_html=True)
 
-st.markdown("#### 2. Capacity Planning Insights")
-buffer_pct = ((avg_gross_upd - planned_upd) / avg_gross_upd) * 100 if avg_gross_upd > 0 else 0
-implied_oee = (planned_upd / theo_max_upd) * 100 if theo_max_upd > 0 else 0
+st.write("") # Spacer
 
-if avg_gross_upd >= planned_upd:
-    insight_text = f"""
-    Validation shows the current ATE Tester actual average capacity is approx. <span class='insight-highlight'>{avg_gross_upd:,.0f} ea/day</span>, surpassing your planned target of <span class='insight-highlight'>{planned_upd:,.0f}</span>.<br>
-    Using {planned_upd:,.0f} as your Capacity Planning baseline is a safe setting, preserving a <span class='insight-highlight'>{buffer_pct:.1f}%</span> capacity buffer to accommodate tester downtime or setup losses.
-    """
-else:
-    insight_text = f"""
-    ⚠️ <b>Notice:</b> The current actual average capacity is approx. <span class='insight-highlight'>{avg_gross_upd:,.0f} ea/day</span>, which is <b>below</b> your planned target of <span class='insight-highlight'>{planned_upd:,.0f}</span>.<br>
-    It is recommended to lower the planning baseline or investigate the production line for abnormal downtime causing the shortfall.
-    """
+# ---------------------------------------------------------
+# Part C: Insights & Visualizations (Side by Side)
+# ---------------------------------------------------------
+col_insight, col_chart = st.columns([1, 1.2])
 
-st.markdown(f"<div class='insight-box'>{insight_text}</div>", unsafe_allow_html=True)
+with col_insight:
+    st.markdown("#### 2. Capacity Planning Insights")
+    buffer_pct = ((avg_gross_upd - planned_upd) / avg_gross_upd) * 100 if avg_gross_upd > 0 else 0
+    implied_oee = (planned_upd / theo_max_upd) * 100 if theo_max_upd > 0 else 0
 
-insight_data = {
-    "Metric": ["Report Avg UPD (TestQty)", "Your Planned Target UPD", "Theoretical Max UPD", f"Implied OEE (at {planned_upd})"],
-    "Value": [f"{avg_gross_upd:,.0f}", f"{planned_upd:,.0f}", f"{theo_max_upd:,.0f}", f"{implied_oee:.1f}%"],
-    "Note": [
-        "Actual throughput performance",
-        "Current safety level for scheduling",
-        "100% OEE, zero downtime/re-tests",
-        "Assumed buffer for setups and abnormalities"
-    ]
-}
-st.dataframe(pd.DataFrame(insight_data), use_container_width=True, hide_index=True)
+    if avg_gross_upd >= planned_upd:
+        insight_text = f"""
+        Validation shows the current ATE Tester actual average capacity is approx. <span class='insight-highlight'>{avg_gross_upd:,.0f} ea/day</span>, surpassing your planned target of <span class='insight-highlight'>{planned_upd:,.0f}</span>.<br>
+        Using {planned_upd:,.0f} as your Capacity Planning baseline is a safe setting, preserving a <span class='insight-highlight'>{buffer_pct:.1f}%</span> capacity buffer.
+        """
+    else:
+        insight_text = f"""
+        ⚠️ <b>Notice:</b> The current actual average capacity is approx. <span class='insight-highlight'>{avg_gross_upd:,.0f} ea/day</span>, which is <b>below</b> your planned target of <span class='insight-highlight'>{planned_upd:,.0f}</span>.<br>
+        It is recommended to lower the planning baseline or investigate the production line for abnormal downtime causing the shortfall.
+        """
+    st.markdown(f"<div class='insight-box'>{insight_text}</div>", unsafe_allow_html=True)
 
-st.markdown("#### 3. Tester Performance Details (A/P/Q Breakdown)")
+    insight_data = {
+        "Metric": ["Report Avg UPD (Gross)", "Planned Target UPD", "Theoretical Max UPD", f"Implied OEE (at {planned_upd})"],
+        "Value": [f"{avg_gross_upd:,.0f}", f"{planned_upd:,.0f}", f"{theo_max_upd:,.0f}", f"{implied_oee:.1f}%"],
+        "Note": ["Actual performance", "Scheduling safety level", "100% OEE (Ideal)", "Assumed buffer"]
+    }
+    st.dataframe(pd.DataFrame(insight_data), use_container_width=True, hide_index=True)
+
+with col_chart:
+    st.markdown("#### 3. Tester Throughput Comparison")
+    
+    fig = px.bar(
+        tester_summary, 
+        x='Tester', 
+        y=['Avg_Gross_UPD', 'Avg_Net_UPD'],
+        barmode='group',
+        labels={'value': 'Units Per Day (UPD)', 'variable': 'Metrics', 'Tester': ''},
+        color_discrete_map={'Avg_Gross_UPD': '#1E3A8A', 'Avg_Net_UPD': '#28a745'}
+    )
+    
+    fig.add_hline(y=planned_upd, line_dash="dash", line_color="orange", 
+                  annotation_text="Planned Target", annotation_position="top right")
+    fig.add_hline(y=theo_max_upd, line_dash="dot", line_color="red", 
+                  annotation_text="Theoretical Max", annotation_position="top right")
+    
+    fig.update_layout(
+        legend_title_text='',
+        margin=dict(t=20, b=0, l=0, r=0),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+# ---------------------------------------------------------
+# Part D: Tester Summary Table (Reordered)
+# ---------------------------------------------------------
+st.markdown("#### 4. Tester Performance Details (A/P/Q Breakdown)")
+
 display_df = tester_summary[[
-    'Tester', 'Lot_Count', 'Active_Days', 
-    'Availability (A)', 'Performance (P)', 'Yield (Q)', 
-    'Avg_Gross_UPD', 'Avg_Net_UPD', 'Avg_OEE'
+    'Tester', 'Lot_Count', 'Yield (Q)', 
+    'Avg_Gross_UPD', 'Avg_Net_UPD', 'Avg_OEE',
+    'Active_Days', 'Availability (A)', 'Performance (P)'
 ]].copy()
 
 display_df = display_df.rename(columns={
-    'Tester': 'Tester', 'Lot_Count': 'Lot Count', 'Active_Days': 'Active Days',
-    'Availability (A)': 'Availability (A)', 'Performance (P)': 'Performance (P)', 'Yield (Q)': 'Yield (Q)',
-    'Avg_Gross_UPD': 'Avg UPD (TestQty)', 'Avg_Net_UPD': 'Avg UPD (PassQty)', 'Avg_OEE': 'Avg OEE'
+    'Tester': 'Tester', 'Lot_Count': 'Lot Count', 'Yield (Q)': 'Yield (Q)',
+    'Avg_Gross_UPD': 'Avg UPD (TestQty)', 'Avg_Net_UPD': 'Avg UPD (PassQty)', 'Avg_OEE': 'Avg OEE',
+    'Active_Days': 'Active Days', 'Availability (A)': 'Availability (A)', 'Performance (P)': 'Performance (P)'
 })
 
-display_df['Active Days'] = display_df['Active Days'].apply(lambda x: f"{x:.1f}")
-display_df['Availability (A)'] = display_df['Availability (A)'].apply(lambda x: f"{x*100:.1f}%")
-display_df['Performance (P)'] = display_df['Performance (P)'].apply(lambda x: f"{x*100:.1f}%")
-display_df['Yield (Q)'] = display_df['Yield (Q)'].apply(lambda x: f"{x*100:.1f}%")
+display_df['Yield (Q)'] = display_df['Yield (Q)'].apply(lambda x: f"{x*100:.2f}%")
 display_df['Avg UPD (TestQty)'] = display_df['Avg UPD (TestQty)'].apply(lambda x: f"{x:,.0f}")
 display_df['Avg UPD (PassQty)'] = display_df['Avg UPD (PassQty)'].apply(lambda x: f"{x:,.0f}")
 display_df['Avg OEE'] = display_df['Avg OEE'].apply(lambda x: f"{x*100:.1f}%")
+display_df['Active Days'] = display_df['Active Days'].apply(lambda x: f"{x:.1f}")
+display_df['Availability (A)'] = display_df['Availability (A)'].apply(lambda x: f"{x*100:.1f}%")
+display_df['Performance (P)'] = display_df['Performance (P)'].apply(lambda x: f"{x*100:.1f}%")
 
 st.dataframe(display_df, use_container_width=True, hide_index=True)
