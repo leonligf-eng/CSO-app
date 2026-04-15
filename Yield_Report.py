@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, time
 
 st.set_page_config(page_title="ATE Tester Capacity Analysis", layout="wide")
 
-# --- Custom CSS (Preserving KPI Cards and Green Highlight) ---
+# --- Custom CSS (Preserving KPI Cards and Green Highlight, plus fixing Multiselect Tags) ---
 st.markdown("""
     <style>
     /* Top KPI Card Style */
@@ -34,6 +34,17 @@ st.markdown("""
     .summary-title { color: #6c757d; font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;}
     .summary-value { color: #28a745; font-size: 26px; font-weight: bold; margin-top: 5px; }
     .summary-value-small { color: #28a745; font-size: 20px; font-weight: bold; margin-top: 10px; } 
+
+    /* 強制取消 Multiselect 選擇標籤 (紅色框框) 的文字截斷 */
+    .stMultiSelect [data-baseweb="tag"] {
+        max-width: 100% !important; /* 允許標籤佔滿整個容器 */
+    }
+    .stMultiSelect [data-baseweb="tag"] span {
+        white-space: normal !important; /* 允許文字自動換行，不會被硬切斷 */
+        max-width: none !important;     /* 解除最大寬度限制 */
+        overflow: visible !important;
+        text-overflow: clip !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -99,7 +110,7 @@ st.sidebar.divider()
 st.sidebar.header("⚙️ 2. Cutoff Settings")
 cutoff_hour = st.sidebar.slider("Daily Cutoff Time (Hour)", min_value=0, max_value=23, value=0, help="0 = 24:00 (Midnight).")
 
-# 🌟 NEW: ATE Smart Capacity Standard Parameters for OEE Calculation
+# ATE Smart Capacity Standard Parameters for OEE Calculation
 st.sidebar.divider()
 st.sidebar.header("📐 3. Standard Params (For OEE)")
 st.sidebar.caption("Define the theoretical standards for the selected program.")
@@ -147,7 +158,7 @@ with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
 
 st.markdown("### 🔍 Data Filters")
 
-# 🌟 FIX 1: Adjust Column Ratio to [1, 2] to give ProgramName more width
+# Adjust Column Ratio to [1, 2] to give ProgramName more width
 filter_col1, filter_col2 = st.columns([1, 2])
 
 with filter_col1:
@@ -259,7 +270,7 @@ tester_summary = daily_stats.groupby('Tester').agg(
     Avg_UPD=('Daily_UPD', 'mean')
 ).reset_index()
 
-# 🌟 FIX 2: OEE Calculation Integration (Actual UPD / Theoretical Max UPD)
+# OEE Calculation Integration (Actual UPD / Theoretical Max UPD)
 tester_summary['Avg_OEE'] = tester_summary['Avg_UPD'] / theo_max_upd
 
 # Real UPW Calculation
