@@ -74,8 +74,10 @@ def generate_mock_data():
     data = []
     testers = [f"HP93K-EXA{i:02d}" for i in range(2, 10)]
     ops = ["FT1", "FTA", "MT1"]
-    programs_map = {"FT1": ["PROD_GS631_FT1_REV1"], "FTA": ["PROD_GS631_FTA_REV1"], "MT1": ["PROD_GS631_MT1_REV1"]}
-    products = ["SS16G", "MU16G", "HY12G", "SS12G"] # 🌟 新增模擬產品料號
+    programs_map = {"FT1": ["PROD_GS631_FT1_REV1", "PROD_GS631_FT1_REV2"], 
+                    "FTA": ["PROD_GS631_FTA_REV1"], 
+                    "MT1": ["PROD_GS631_MT1_REV1"]}
+    products = ["SS16G", "MU16G", "HY12G", "SS12G"]
     
     tester_clocks = {tester: now - timedelta(days=30) for tester in testers}
     
@@ -111,7 +113,6 @@ def load_data(file):
             df['CheckOutTime'] = pd.to_datetime(df['CheckOutTime'], errors='coerce')
             df['TestQty'] = pd.to_numeric(df['TestQty'], errors='coerce').fillna(0)
             df['PassQty'] = pd.to_numeric(df['PassQty'], errors='coerce').fillna(0)
-            # 確保 ProductNo 存在，若無則補空值
             if 'ProductNo' not in df.columns:
                 df['ProductNo'] = "Unknown_Product"
             return df
@@ -127,7 +128,6 @@ if raw_df is None or raw_df.empty:
     st.warning("No data available.")
     st.stop()
 
-# 獲取資料日期極值
 min_date = raw_df['CheckInTime'].min().date() if pd.notnull(raw_df['CheckInTime'].min()) else datetime.now().date()
 max_date = raw_df['CheckOutTime'].max().date() if pd.notnull(raw_df['CheckOutTime'].max()) else datetime.now().date()
 
@@ -165,26 +165,19 @@ with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
 
 st.markdown("### 🔍 Data Filters")
 
-# 🌟 新增：時間區間過濾器 (放在最上方，跨越所有欄位)
-date_range = st.date_input("Select Date Range (CheckIn/Out Overlap)", value=(min_date, max_date), min_value=min_date, max_value=max_date)
+# 🌟 邏輯重構：依照 OpNo -> ProgramName -> Date Range -> ProductNo 的順序
 
-# 處理日期選擇邏輯 (確保始終有 start_date 和 end_date)
-if isinstance(date_range, tuple) and len(date_range) == 2:
-    start_date, end_date = date_range
-else:
-    start_date = end_date = date_range[0] if isinstance(date_range, (list, tuple)) else date_range
+filter_col1, filter_col2 = st.columns([1, 1])
 
-filter_col1, filter_col2, filter_col3 = st.columns([1, 1, 1])
-
+# 👉 1. 生成 OpNo 選單 (基於全部原始資料)
 with filter_col1:
     op_options = sorted(raw_df['OpNo'].dropna().unique().tolist())
     selected_ops = st.multiselect("Select Operation (OpNo)", options=op_options, key="op_select")
 
+# 👉 2. 生成 ProgramName 選單 (只顯示該站點有跑的程式)
 filtered_by_op = raw_df[raw_df['OpNo'].isin(selected_ops)] if selected_ops else raw_df
 prog_options = sorted(filtered_by_op['ProgramName'].dropna().unique().tolist())
-prod_options = sorted(filtered_by_op['ProductNo'].dropna().unique().tolist()) # 🌟 取得 ProductNo 選項
 
-# Session State 管理 ProgramName
 if 'saved_progs' not in st.session_state: st.session_state.saved_progs = []
 def update_progs(): st.session_state.saved_progs = st.session_state.prog_select_widget
 valid_defaults_prog = [p for p in st.session_state.saved_progs if p in prog_options]
@@ -192,13 +185,36 @@ valid_defaults_prog = [p for p in st.session_state.saved_progs if p in prog_opti
 with filter_col2:
     selected_progs = st.multiselect("Select Program", options=prog_options, default=valid_defaults_prog, key="prog_select_widget", on_change=update_progs)
 
-# Session State 管理 ProductNo
+
+filter_col3, filter_col4 = st.columns([1, 1])
+
+# 👉 3. 選擇時間區間 ➡️ 系統拿 (OpNo + ProgramName + 時間) 去砍資料
+with filter_col3:
+    date_range = st.date_input("Select Date Range (CheckIn/Out Overlap)", value=(min_date, max_date), min_value=min_date, max_value=max_date)
+    if isinstance(date_range, tuple) and len(date_range) == 2:
+        start_date, end_date = date_range
+    else:
+        start_date = end_date = date_range[0] if isinstance(date_range, (list, tuple)) else date_range
+
+# 進行嚴格的交集過濾 (OpNo + Program + Date)
+mask_stage_3 = (
+    filtered_by_op['ProgramName'].isin(selected_progs) &
+    (filtered_by_op['CheckInTime'].dt.date <= end_date) & 
+    (filtered_by_op['CheckOutTime'].dt.date >= start_date)
+)
+filtered_by_op_prog_date = filtered_by_op[mask_stage_3] if selected_progs else filtered_by_op[
+    (filtered_by_op['CheckInTime'].dt.date <= end_date) & 
+    (filtered_by_op['CheckOutTime'].dt.date >= start_date)
+]
+
+# 👉 4. 生成 ProductNo 選單 (只顯示該時間段 + 該站點 + 該程式有跑的產品)
+prod_options = sorted(filtered_by_op_prog_date['ProductNo'].dropna().unique().tolist())
+
 if 'saved_prods' not in st.session_state: st.session_state.saved_prods = []
 def update_prods(): st.session_state.saved_prods = st.session_state.prod_select_widget
 valid_defaults_prod = [p for p in st.session_state.saved_prods if p in prod_options]
 
-with filter_col3:
-    # 🌟 新增：ProductNo 篩選器
+with filter_col4:
     selected_prods = st.multiselect("Select Product (ProductNo)", options=prod_options, default=valid_defaults_prod, key="prod_select_widget", on_change=update_prods)
 
 st.divider()
@@ -229,17 +245,13 @@ if not selected_ops or not selected_progs or not selected_prods:
 # ==============================================================================
 # --- 3. Data Processing Engine ---
 # ==============================================================================
-# 🌟 核心升級：將 Date Range 與 ProductNo 加入過濾條件
-mask = (
-    raw_df['OpNo'].isin(selected_ops) & 
-    raw_df['ProgramName'].isin(selected_progs) &
-    raw_df['ProductNo'].isin(selected_prods) &
-    (raw_df['TestQty'] >= min_lot_size) &
-    (raw_df['CheckInTime'].dt.date <= end_date) & 
-    (raw_df['CheckOutTime'].dt.date >= start_date)
+# 最後把 ProductNo 與 Min Lot Size 也加入過濾，產生最終分析資料集
+mask_final = (
+    filtered_by_op_prog_date['ProductNo'].isin(selected_prods) &
+    (filtered_by_op_prog_date['TestQty'] >= min_lot_size)
 )
 
-filtered_df = raw_df[mask].copy()
+filtered_df = filtered_by_op_prog_date[mask_final].copy()
 
 if filtered_df.empty:
     st.warning("No production data available for the selected filters and date range.")
@@ -401,7 +413,7 @@ for idx, op in enumerate(selected_ops):
         st.write("")
 
         # ---------------------------------------------------------
-        # Part E: Visualizations (Throughput + Product Mix)
+        # Part E: Visualizations
         # ---------------------------------------------------------
         st.markdown("#### 4. Visualizations")
         
@@ -420,7 +432,6 @@ for idx, op in enumerate(selected_ops):
             st.plotly_chart(fig1, use_container_width=True)
             
         with col_chart2:
-            # 🌟 新增：Product Mix 堆疊圖
             prod_summary = op_df.groupby(['Tester', 'ProductNo'])['TestQty'].sum().reset_index()
             fig2 = px.bar(
                 prod_summary, x='Tester', y='TestQty', color='ProductNo',
