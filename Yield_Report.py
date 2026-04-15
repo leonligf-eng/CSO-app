@@ -62,15 +62,26 @@ def generate_mock_data():
 def load_data(file):
     if file is not None:
         try:
+            # 讀取真實檔案的 Report 分頁
             df = pd.read_excel(file, sheet_name="Report")
-            df['CheckInTime'] = pd.to_datetime(df['CheckInTime'])
-            df['CheckOutTime'] = pd.to_datetime(df['CheckOutTime'])
-            if 'OpNo' not in df.columns:
-                df['OpNo'] = 'Default_OP'
+            
+            # 🌟 防呆：清除所有標題欄位前後可能不小心多打的空白鍵
+            df.columns = df.columns.str.strip()
+            
+            # 確保時間格式正確 (吃你的 CheckInTime, CheckOutTime)
+            df['CheckInTime'] = pd.to_datetime(df['CheckInTime'], errors='coerce')
+            df['CheckOutTime'] = pd.to_datetime(df['CheckOutTime'], errors='coerce')
+            
+            # 如果資料有缺漏值，進行基本的填補防呆
+            df['TestQty'] = pd.to_numeric(df['TestQty'], errors='coerce').fillna(0)
+            df['PassQty'] = pd.to_numeric(df['PassQty'], errors='coerce').fillna(0)
+            
             return df
         except Exception as e:
-            st.error(f"Error loading file: {e}")
+            st.error(f"檔案讀取失敗，請確認是否包含 Report 分頁。錯誤細節: {str(e)}")
             return None
+            
+    # 若沒有上傳，則執行我們先前寫好的 generate_mock_data()
     return generate_mock_data()
 
 # ==============================================================================
