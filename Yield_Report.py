@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, time
 
 st.set_page_config(page_title="ATE Tester Capacity Analysis", layout="wide")
 
-# --- Custom CSS (完美還原 KPI 卡片與綠色高亮文字) ---
+# --- Custom CSS (Preserving KPI Cards and Green Highlight) ---
 st.markdown("""
     <style>
     /* KPI Card Style */
@@ -44,7 +44,8 @@ def generate_mock_data():
         "FT2": ["PVT", "MP"]
     }
     
-    for i in range(120):
+    # Extended to 21 days back to demonstrate actual weekly (UPW) logic
+    for i in range(200):
         tester = np.random.choice(testers)
         op = np.random.choice(ops)
         prog = np.random.choice(programs_map[op])
@@ -52,7 +53,7 @@ def generate_mock_data():
         yield_rate = np.random.uniform(0.85, 0.99)
         pass_qty = int(qty * yield_rate)
         
-        start_time = now - timedelta(days=np.random.randint(0, 7), hours=np.random.randint(0, 24))
+        start_time = now - timedelta(days=np.random.randint(0, 21), hours=np.random.randint(0, 24))
         end_time = start_time + timedelta(hours=np.random.uniform(2, 16)) 
         
         data.append([f"LOT_{i:04d}", op, prog, tester, start_time, end_time, qty, pass_qty])
@@ -62,30 +63,20 @@ def generate_mock_data():
 def load_data(file):
     if file is not None:
         try:
-            # 讀取真實檔案的 Report 分頁
             df = pd.read_excel(file, sheet_name="Report")
-            
-            # 🌟 防呆：清除所有標題欄位前後可能不小心多打的空白鍵
             df.columns = df.columns.str.strip()
-            
-            # 確保時間格式正確 (吃你的 CheckInTime, CheckOutTime)
             df['CheckInTime'] = pd.to_datetime(df['CheckInTime'], errors='coerce')
             df['CheckOutTime'] = pd.to_datetime(df['CheckOutTime'], errors='coerce')
-            
-            # 如果資料有缺漏值，進行基本的填補防呆
             df['TestQty'] = pd.to_numeric(df['TestQty'], errors='coerce').fillna(0)
             df['PassQty'] = pd.to_numeric(df['PassQty'], errors='coerce').fillna(0)
-            
             return df
         except Exception as e:
-            st.error(f"檔案讀取失敗，請確認是否包含 Report 分頁。錯誤細節: {str(e)}")
+            st.error(f"Failed to load file. Please ensure the 'Report' sheet exists. Error: {str(e)}")
             return None
-            
-    # 若沒有上傳，則執行我們先前寫好的 generate_mock_data()
     return generate_mock_data()
 
 # ==============================================================================
-# --- 1. Sidebar & Filters ---
+# --- 1. Sidebar Settings ---
 # ==============================================================================
 st.sidebar.header("📁 1. Data Input")
 uploaded_file = st.sidebar.file_uploader("Upload Yield Report (Excel)", type=["xlsx", "xls"])
@@ -96,25 +87,55 @@ if raw_df is None or raw_df.empty:
     st.stop()
 
 st.sidebar.divider()
-st.sidebar.header("🔍 2. Data Filters")
+st.sidebar.header("⚙️ 2. Calculation Settings")
+cutoff_hour = st.sidebar.slider("Daily Cutoff Time (Hour)", min_value=0, max_value=23, value=0, help="0 = 24:00 (Midnight).")
 
-op_options = sorted(raw_df['OpNo'].dropna().unique().tolist())
-selected_ops = st.sidebar.multiselect("選擇站點 (OpNo)", options=op_options, default=op_options)
+# ==============================================================================
+# --- 2. Main Area: Help Section & Filters ---
+# ==============================================================================
+with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
+    st.markdown("""
+    ### 📖 Calculation Logic
+    To ensure precision in daily capacity and equipment efficiency, this system employs a **"Cross-Day Apportionment"** algorithm to prevent data distortion caused by lots crossing the daily cutoff time.
+
+    #### Phase 1: Cross-Day Apportionment
+    For any lot that crosses the designated Daily Cutoff Time, the system splits its output and duration proportionally:
+    * **Time Ratio (R):** `Seconds tested on Current Day / Total Test Seconds`
+    * **Apportioned Qty:** `TestQty * R`
+    * **Apportioned Duration (Hours):** `Total Duration (Hours) * R`
+
+    #### Phase 2: Tester Summary Metrics
+    After the foundational apportionment, metrics are aggregated per ATE:
+    * **Daily UPD:** `SUM(Apportioned Qty)` for a specific day.
+    * **Avg UPD:** `SUM(Daily UPD) / Days with production activity`.
+    * **Real UPW:** Aggregates production into actual calendar weeks, then calculates the `AVERAGE(Weekly Output)`.
+    * **Daily OEE:** `SUM(Apportioned Duration) / 24` *(Using 24 hours as full load base)*.
+    * **Avg OEE:** `(SUM(Daily OEE) / Days with production activity) * 100%`.
+    * **Lot Count:** Number of unique lots processed by the tester during the selected period.
+    """)
+
+st.markdown("### 🔍 Data Filters")
+
+filter_col1, filter_col2 = st.columns(2)
+
+with filter_col1:
+    op_options = sorted(raw_df['OpNo'].dropna().unique().tolist())
+    selected_ops = st.multiselect("Select Operation (OpNo)", options=op_options, default=op_options)
 
 filtered_by_op = raw_df[raw_df['OpNo'].isin(selected_ops)] if selected_ops else raw_df
 prog_options = sorted(filtered_by_op['ProgramName'].dropna().unique().tolist())
-selected_progs = st.sidebar.multiselect("選擇程式 (ProgramName)", options=prog_options, default=prog_options)
 
-st.sidebar.divider()
-st.sidebar.header("⚙️ 3. Calculation Settings")
-cutoff_hour = st.sidebar.slider("Daily Cutoff Time (Hour)", min_value=0, max_value=23, value=0, help="0 = 24:00 (Midnight).")
+with filter_col2:
+    selected_progs = st.multiselect("Select Program (ProgramName)", options=prog_options, default=prog_options)
 
 if not selected_ops or not selected_progs:
-    st.info("👈 請在左側側邊欄選擇 **OpNo** 與 **ProgramName**。")
+    st.info("👆 Please select **OpNo** and **ProgramName** above to generate the report.")
     st.stop()
 
+st.divider()
+
 # ==============================================================================
-# --- 2. Data Processing Engine ---
+# --- 3. Data Processing Engine ---
 # ==============================================================================
 filtered_df = raw_df[(raw_df['OpNo'].isin(selected_ops)) & (raw_df['ProgramName'].isin(selected_progs))].copy()
 
@@ -166,11 +187,14 @@ cutoff_time_obj = time(cutoff_hour, 0)
 df_split = split_cross_day_lots(filtered_df, cutoff_time_obj)
 
 if df_split.empty:
-    st.warning("所選條件下無生產資料，請重新調整 Filter。")
+    st.warning("No production data available for the selected filters.")
     st.stop()
 
+# Essential formatting for Real UPW logic
+df_split['ProductionDate'] = pd.to_datetime(df_split['ProductionDate'])
+
 # ==============================================================================
-# --- 3. Dashboard UI ---
+# --- 4. Dashboard UI ---
 # ==============================================================================
 
 # ---------------------------------------------------------
@@ -178,7 +202,6 @@ if df_split.empty:
 # ---------------------------------------------------------
 st.markdown("### 📊 Overall Performance")
 
-# 確保 PassQty 與 TestQty 抓取的是不重複的批次，避免跨日切割造成的重複計算
 unique_lots = filtered_df.drop_duplicates(subset=['LotNo'])
 total_upd = int(df_split['ApportionedQty'].sum())
 total_pass = int(unique_lots['PassQty'].sum())
@@ -187,7 +210,7 @@ overall_yield = (total_pass / total_test) * 100 if total_test > 0 else 0
 active_testers = df_split['Tester'].nunique()
 
 c1, c2, c3, c4 = st.columns(4)
-with c1: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Total UPD (Units)</div><div class='kpi-value'>{total_upd:,}</div></div>", unsafe_allow_html=True)
+with c1: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Total Output (Units)</div><div class='kpi-value'>{total_upd:,}</div></div>", unsafe_allow_html=True)
 with c2: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Total Pass</div><div class='kpi-value'>{total_pass:,}</div></div>", unsafe_allow_html=True)
 with c3: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Overall Yield</div><div class='kpi-value'>{overall_yield:.2f}%</div></div>", unsafe_allow_html=True)
 with c4: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Active Testers</div><div class='kpi-value'>{active_testers}</div></div>", unsafe_allow_html=True)
@@ -197,9 +220,9 @@ st.divider()
 # ---------------------------------------------------------
 # Part B: ATE Tester Capacity Analysis
 # ---------------------------------------------------------
-st.markdown("## ATE Tester 產能分析與驗證")
+st.markdown("## ATE Tester Capacity Analysis & Validation")
 
-# 數據計算
+# Calculate Daily metrics
 daily_stats = df_split.groupby(['Tester', 'ProductionDate']).agg(
     Daily_UPD=('ApportionedQty', 'sum'),
     Daily_Duration=('ApportionedDuration_Hr', 'sum')
@@ -212,25 +235,39 @@ tester_summary = daily_stats.groupby('Tester').agg(
     Avg_OEE=('Daily_OEE', 'mean')
 ).reset_index()
 
-tester_summary['Avg_UPW'] = tester_summary['Avg_UPD'] * 7
+# 🌟 NEW LOGIC: Real UPW Calculation
+# Group by Tester and Calendar Week (W ends on Sunday)
+weekly_stats = df_split.groupby(['Tester', pd.Grouper(key='ProductionDate', freq='W')]).agg(
+    Weekly_UPW=('ApportionedQty', 'sum')
+).reset_index()
+
+# Average the actual weekly throughputs per tester
+avg_weekly = weekly_stats.groupby('Tester').agg(
+    Real_UPW=('Weekly_UPW', 'mean')
+).reset_index()
+
+# Merge Real UPW into the main summary table
+tester_summary = tester_summary.merge(avg_weekly, on='Tester', how='left')
+
+# Get Lot Counts
 lot_counts = filtered_df.groupby('Tester')['LotNo'].nunique().reset_index().rename(columns={'LotNo': 'Lots'})
 tester_summary = tester_summary.merge(lot_counts, on='Tester', how='left')
 tester_summary = tester_summary.sort_values(by='Avg_UPD', ascending=False)
 
-# 摘要計算
+# Global Summary Aggregation
 avg_actual_upd = tester_summary['Avg_UPD'].mean()
-avg_actual_upw = avg_actual_upd * 7
+avg_actual_upw = tester_summary['Real_UPW'].mean()
 avg_actual_oee = tester_summary['Avg_OEE'].mean() * 100
 max_upd, min_upd = tester_summary['Avg_UPD'].max(), tester_summary['Avg_UPD'].min()
 
-st.markdown("#### 1. 關鍵分析結果摘要")
+st.markdown("#### 1. Key Analysis Summary")
 st.markdown(f"""
 <div class='summary-text'>
 <ul>
-    <li>平均實際 UPD： <span class='highlight-val'>{avg_actual_upd:,.0f}</span></li>
-    <li>平均實際 UPW： <span class='highlight-val'>{avg_actual_upw:,.0f}</span></li>
-    <li>平均 OEE： <span class='highlight-val'>{avg_actual_oee:.1f}%</span></li>
-    <li>UPD 範圍： <span class='highlight-val'>{min_upd:,.0f} ~ {max_upd:,.0f}</span></li>
+    <li><b>Avg Actual UPD:</b> <span class='highlight-val'>{avg_actual_upd:,.0f}</span></li>
+    <li><b>Real Avg UPW:</b> <span class='highlight-val'>{avg_actual_upw:,.0f}</span></li>
+    <li><b>Avg OEE:</b> <span class='highlight-val'>{avg_actual_oee:.1f}%</span></li>
+    <li><b>UPD Range:</b> <span class='highlight-val'>{min_upd:,.0f} ~ {max_upd:,.0f}</span></li>
 </ul>
 </div>
 """, unsafe_allow_html=True)
@@ -240,19 +277,19 @@ st.markdown("<br>", unsafe_allow_html=True)
 # ---------------------------------------------------------
 # Part C: Tester Summary Table
 # ---------------------------------------------------------
-st.markdown("#### 2. 各機台表現分析 (Tester Summary)")
+st.markdown("#### 2. Tester Performance Analysis (Summary)")
 
 display_df = tester_summary.copy()
 display_df = display_df.rename(columns={
     'Tester': 'Tester',
-    'Avg_UPD': '平均 UPD',
-    'Avg_UPW': '平均 UPW',
-    'Avg_OEE': '平均 OEE',
-    'Lots': '批次數量 (Lots)'
+    'Avg_UPD': 'Avg UPD',
+    'Real_UPW': 'Real UPW',
+    'Avg_OEE': 'Avg OEE',
+    'Lots': 'Lot Count'
 })
 
-display_df['平均 UPD'] = display_df['平均 UPD'].apply(lambda x: f"{x:,.0f}")
-display_df['平均 UPW'] = display_df['平均 UPW'].apply(lambda x: f"{x:,.0f}")
-display_df['平均 OEE'] = display_df['平均 OEE'].apply(lambda x: f"{x*100:.1f}%")
+display_df['Avg UPD'] = display_df['Avg UPD'].apply(lambda x: f"{x:,.0f}")
+display_df['Real UPW'] = display_df['Real UPW'].apply(lambda x: f"{x:,.0f}")
+display_df['Avg OEE'] = display_df['Avg OEE'].apply(lambda x: f"{x*100:.1f}%")
 
 st.dataframe(display_df, use_container_width=True, hide_index=True)
