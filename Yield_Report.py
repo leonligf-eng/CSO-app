@@ -81,18 +81,19 @@ if raw_df is None or raw_df.empty:
     st.stop()
 
 # ==============================================================================
-# --- 1. Main Area: Filters & Unabridged Help Section ---
+# --- 1. Main Area: Filters & Help Section ---
 # ==============================================================================
-# 🌟 保證一字不漏的完整版 Help 說明
+# 🌟 補回完整無缺的 P (Performance) 計算拆解公式
 with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
     st.markdown("""
     This system employs rigorous Industrial Engineering (IE) logic combined with actual production report data to calculate authentic equipment efficiency. Metric definitions are as follows:
 
-    #### 1. Capacity Metrics
-    * **Gross UPD (Actual Throughput):** Calculated using `TestQty`. Represents the total units processed by the tester (including pass and fail units). This metric evaluates the pure production speed.
-    * **Net UPD (Effective Good Units):** Calculated using `PassQty`. Represents the total valid good units produced.
-    * **Active Days:** The total number of hours a tester spent in the "Testing" state (CheckIn to CheckOut) within the selected period, divided by 24 hours.
-    * **Calculation (Precise Average):** `Avg UPD = Total Units in Period / Active Days`. This prevents average distortion caused by fragmented, incomplete days.
+    #### 1. Capacity Metrics (Tester View vs. Product View)
+    * **Total Insertions (Gross):** Total testing actions performed by the testers across all operations (allows double-counting across ops).
+    * **Est. Physical Units:** Estimated actual ICs processed, calculated by de-duplicating `LotNo` and taking the max input quantity.
+    * **Gross UPD (Actual Throughput):** Calculated using `TestQty`. Evaluates pure production speed.
+    * **Active Days:** The total number of hours a tester spent in the "Testing" state within the selected period, divided by 24 hours.
+    * **Calculation:** `Avg UPD = Total Units in Period / Active Days`.
 
     #### 2. OEE Breakdown (Availability, Performance, Quality)
     This system utilizes a Top-Down output-driven approach alongside traditional A/P/Q dual verification to ensure data accuracy.
@@ -109,7 +110,7 @@ with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
 
     #### 3. Capacity Planning Metrics
     * **Planned Target UPD:** The safety scheduling baseline preset by Planning or Engineering.
-    * **Implied OEE:** The ratio of the Planned Target against the 100% theoretical capacity. `Calculation = Planned Target UPD / Theoretical Max UPD`. This reflects the built-in buffer percentage reserved for setups, maintenance, and re-tests.
+    * **Implied OEE:** * **Implied OEE:** The ratio of the Planned Target against the 100% theoretical capacity. `Calculation = Planned Target UPD / Theoretical Max UPD`. Reflects the built-in buffer percentage reserved for setups, maintenance, and re-tests.
     """)
 
 st.markdown("### 🔍 Data Filters")
@@ -195,17 +196,15 @@ tester_summary = tester_summary.sort_values(by=['OpNo', 'Tester'], ascending=Tru
 # --- 4. Dashboard UI ---
 # ==============================================================================
 
+# ---------------------------------------------------------
+# Part A: Overall Performance (Capacity vs. Product View)
+# ---------------------------------------------------------
 st.markdown("### 📊 Overall Performance")
 
-# --- 1. Tester View (機台視角：算 Insertions) ---
-# 這裡維持疊加，代表機台承受的總工作量
 total_insertions = int(tester_summary['Total_TestQty'].sum())
 total_pass_insertions = int(tester_summary['Total_PassQty'].sum())
-# 這是「站點平均良率」，並非產品直通良率
 avg_step_yield = (total_pass_insertions / total_insertions) * 100 if total_insertions > 0 else 0
 
-# --- 2. Product View (產品視角：算 Physical Units) ---
-# 用 LotNo 去重，抓每個 Lot 最大投入量作為「實體投入顆數」的概估
 unique_lots_df = filtered_df.groupby('LotNo').agg(
     Max_TestQty=('TestQty', 'max')
 ).reset_index()
@@ -245,18 +244,18 @@ with c4:
     </div>""", unsafe_allow_html=True)
 
 st.divider()
-st.markdown("## ATE Tester Capacity Analysis & Validation")
 
 # ---------------------------------------------------------
 # 1. Period Performance Summary
 # ---------------------------------------------------------
+st.markdown("## ATE Tester Capacity Analysis & Validation")
 st.markdown("#### 1. Period Performance Summary")
-st.caption(f"A total of {valid_lots_count} valid lots were tested (excluding lots < {min_lot_size} ea). Data is prorated based on exact active hours.")
+st.caption(f"A total of {physical_lots} valid lots were tested (excluding lots < {min_lot_size} ea). Data is prorated based on exact active hours.")
 
 global_gross_upd = tester_summary['Avg_Gross_UPD'].mean()
 global_net_upd = tester_summary['Avg_Net_UPD'].mean()
 global_theo_qty = (tester_summary['Active_Days'] * tester_summary['Theo_Max_UPD']).sum()
-global_oee = (total_test / global_theo_qty) * 100 if global_theo_qty > 0 else 0
+global_oee = (total_insertions / global_theo_qty) * 100 if global_theo_qty > 0 else 0
 
 sc1, sc2, sc3 = st.columns(3)
 with sc1: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Actual UPD (TestQty)</div><div class='summary-value'>{global_gross_upd:,.0f}</div></div>", unsafe_allow_html=True)
