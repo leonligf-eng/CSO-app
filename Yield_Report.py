@@ -196,17 +196,53 @@ tester_summary = tester_summary.sort_values(by=['OpNo', 'Tester'], ascending=Tru
 # ==============================================================================
 
 st.markdown("### 📊 Overall Performance")
-total_test = int(tester_summary['Total_TestQty'].sum())
-total_pass = int(tester_summary['Total_PassQty'].sum())
-overall_yield = (total_pass / total_test) * 100 if total_test > 0 else 0
+
+# --- 1. Tester View (機台視角：算 Insertions) ---
+# 這裡維持疊加，代表機台承受的總工作量
+total_insertions = int(tester_summary['Total_TestQty'].sum())
+total_pass_insertions = int(tester_summary['Total_PassQty'].sum())
+# 這是「站點平均良率」，並非產品直通良率
+avg_step_yield = (total_pass_insertions / total_insertions) * 100 if total_insertions > 0 else 0
+
+# --- 2. Product View (產品視角：算 Physical Units) ---
+# 用 LotNo 去重，抓每個 Lot 最大投入量作為「實體投入顆數」的概估
+unique_lots_df = filtered_df.groupby('LotNo').agg(
+    Max_TestQty=('TestQty', 'max')
+).reset_index()
+physical_lots = len(unique_lots_df)
+physical_units = int(unique_lots_df['Max_TestQty'].sum())
+
 active_testers = tester_summary['Tester'].nunique()
-valid_lots_count = int(tester_summary['Lot_Count'].sum())
 
 c1, c2, c3, c4 = st.columns(4)
-with c1: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Total TestQty (Gross)</div><div class='kpi-value'>{total_test:,}</div></div>", unsafe_allow_html=True)
-with c2: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Total PassQty (Net)</div><div class='kpi-value'>{total_pass:,}</div></div>", unsafe_allow_html=True)
-with c3: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Overall Yield</div><div class='kpi-value'>{overall_yield:.2f}%</div></div>", unsafe_allow_html=True)
-with c4: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Active Testers</div><div class='kpi-value'>{active_testers}</div></div>", unsafe_allow_html=True)
+with c1: 
+    st.markdown(f"""
+    <div class='kpi-card'>
+        <div class='kpi-title' title='Total testing actions performed across all operations'>Total Insertions (總吞吐人次)</div>
+        <div class='kpi-value'>{total_insertions:,}</div>
+        <div style='font-size: 12px; color: #888; margin-top: 5px;'>Est. Physical Units: ~{physical_units:,}</div>
+    </div>""", unsafe_allow_html=True)
+with c2: 
+    st.markdown(f"""
+    <div class='kpi-card'>
+        <div class='kpi-title' title='Total passed testing actions'>Pass Insertions (良品吞吐人次)</div>
+        <div class='kpi-value'>{total_pass_insertions:,}</div>
+        <div style='font-size: 12px; color: #888; margin-top: 5px;'>Total Lots: {physical_lots}</div>
+    </div>""", unsafe_allow_html=True)
+with c3: 
+    st.markdown(f"""
+    <div class='kpi-card'>
+        <div class='kpi-title' title='Weighted average yield across all operations'>Avg Step Yield (平均站點良率)</div>
+        <div class='kpi-value'>{avg_step_yield:.2f}%</div>
+        <div style='font-size: 12px; color: #888; margin-top: 5px;'>Not Rolled Throughput Yield</div>
+    </div>""", unsafe_allow_html=True)
+with c4: 
+    st.markdown(f"""
+    <div class='kpi-card'>
+        <div class='kpi-title'>Active Testers</div>
+        <div class='kpi-value'>{active_testers}</div>
+        <div style='font-size: 12px; color: #888; margin-top: 5px;'>Operations: {len(selected_ops)}</div>
+    </div>""", unsafe_allow_html=True)
 
 st.divider()
 st.markdown("## ATE Tester Capacity Analysis & Validation")
