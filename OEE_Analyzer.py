@@ -128,8 +128,9 @@ if raw_df is None or raw_df.empty:
     st.warning("No data available.")
     st.stop()
 
-min_date = raw_df['CheckInTime'].min().date() if pd.notnull(raw_df['CheckInTime'].min()) else datetime.now().date()
-max_date = raw_df['CheckOutTime'].max().date() if pd.notnull(raw_df['CheckOutTime'].max()) else datetime.now().date()
+# 全域極端值 (防呆用)
+global_min_date = raw_df['CheckInTime'].min().date() if pd.notnull(raw_df['CheckInTime'].min()) else datetime.now().date()
+global_max_date = raw_df['CheckOutTime'].max().date() if pd.notnull(raw_df['CheckOutTime'].max()) else datetime.now().date()
 
 # ==============================================================================
 # --- 1. Main Area: Filters & Help Section ---
@@ -165,16 +166,14 @@ with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
 
 st.markdown("### 🔍 Data Filters")
 
-# 🌟 邏輯重構：依照 OpNo -> ProgramName -> Date Range -> ProductNo 的順序
-
 filter_col1, filter_col2 = st.columns([1, 1])
 
-# 👉 1. 生成 OpNo 選單 (基於全部原始資料)
+# 👉 1. 生成 OpNo 選單
 with filter_col1:
     op_options = sorted(raw_df['OpNo'].dropna().unique().tolist())
     selected_ops = st.multiselect("Select Operation (OpNo)", options=op_options, key="op_select")
 
-# 👉 2. 生成 ProgramName 選單 (只顯示該站點有跑的程式)
+# 👉 2. 生成 ProgramName 選單
 filtered_by_op = raw_df[raw_df['OpNo'].isin(selected_ops)] if selected_ops else raw_df
 prog_options = sorted(filtered_by_op['ProgramName'].dropna().unique().tolist())
 
@@ -185,29 +184,37 @@ valid_defaults_prog = [p for p in st.session_state.saved_progs if p in prog_opti
 with filter_col2:
     selected_progs = st.multiselect("Select Program", options=prog_options, default=valid_defaults_prog, key="prog_select_widget", on_change=update_progs)
 
+# 🌟 核心升級：根據已選的 OpNo + ProgramName，動態計算該組合下真實的資料區間
+filtered_by_op_prog = filtered_by_op[filtered_by_op['ProgramName'].isin(selected_progs)] if selected_progs else filtered_by_op
+
+if not filtered_by_op_prog.empty:
+    curr_min_date = filtered_by_op_prog['CheckInTime'].min().date() if pd.notnull(filtered_by_op_prog['CheckInTime'].min()) else global_min_date
+    curr_max_date = filtered_by_op_prog['CheckOutTime'].max().date() if pd.notnull(filtered_by_op_prog['CheckOutTime'].max()) else global_max_date
+else:
+    curr_min_date, curr_max_date = global_min_date, global_max_date
 
 filter_col3, filter_col4 = st.columns([1, 1])
 
-# 👉 3. 選擇時間區間 ➡️ 系統拿 (OpNo + ProgramName + 時間) 去砍資料
+# 👉 3. 選擇時間區間 (預設值被自動縮攏到 curr_min_date 與 curr_max_date)
 with filter_col3:
-    date_range = st.date_input("Select Date Range (CheckIn/Out Overlap)", value=(min_date, max_date), min_value=min_date, max_value=max_date)
+    date_range = st.date_input(
+        "Select Date Range (CheckIn/Out Overlap)", 
+        value=(curr_min_date, curr_max_date), 
+        min_value=global_min_date, 
+        max_value=global_max_date
+    )
     if isinstance(date_range, tuple) and len(date_range) == 2:
         start_date, end_date = date_range
     else:
         start_date = end_date = date_range[0] if isinstance(date_range, (list, tuple)) else date_range
 
-# 進行嚴格的交集過濾 (OpNo + Program + Date)
 mask_stage_3 = (
-    filtered_by_op['ProgramName'].isin(selected_progs) &
-    (filtered_by_op['CheckInTime'].dt.date <= end_date) & 
-    (filtered_by_op['CheckOutTime'].dt.date >= start_date)
+    (filtered_by_op_prog['CheckInTime'].dt.date <= end_date) & 
+    (filtered_by_op_prog['CheckOutTime'].dt.date >= start_date)
 )
-filtered_by_op_prog_date = filtered_by_op[mask_stage_3] if selected_progs else filtered_by_op[
-    (filtered_by_op['CheckInTime'].dt.date <= end_date) & 
-    (filtered_by_op['CheckOutTime'].dt.date >= start_date)
-]
+filtered_by_op_prog_date = filtered_by_op_prog[mask_stage_3]
 
-# 👉 4. 生成 ProductNo 選單 (只顯示該時間段 + 該站點 + 該程式有跑的產品)
+# 👉 4. 生成 ProductNo 選單 (只顯示過濾完所有條件的產品)
 prod_options = sorted(filtered_by_op_prog_date['ProductNo'].dropna().unique().tolist())
 
 if 'saved_prods' not in st.session_state: st.session_state.saved_prods = []
@@ -245,7 +252,6 @@ if not selected_ops or not selected_progs or not selected_prods:
 # ==============================================================================
 # --- 3. Data Processing Engine ---
 # ==============================================================================
-# 最後把 ProductNo 與 Min Lot Size 也加入過濾，產生最終分析資料集
 mask_final = (
     filtered_by_op_prog_date['ProductNo'].isin(selected_prods) &
     (filtered_by_op_prog_date['TestQty'] >= min_lot_size)
