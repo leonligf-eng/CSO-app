@@ -128,7 +128,7 @@ if raw_df is None or raw_df.empty:
     st.warning("No data available.")
     st.stop()
 
-# 全域極端值 (防呆用)
+# 🌟 補回全域極端值 (防呆用，提供時間選擇器的絕對上下限)
 global_min_date = raw_df['CheckInTime'].min().date() if pd.notnull(raw_df['CheckInTime'].min()) else datetime.now().date()
 global_max_date = raw_df['CheckOutTime'].max().date() if pd.notnull(raw_df['CheckOutTime'].max()) else datetime.now().date()
 
@@ -173,7 +173,7 @@ with filter_col1:
     op_options = sorted(raw_df['OpNo'].dropna().unique().tolist())
     selected_ops = st.multiselect("Select Operation (OpNo)", options=op_options, key="op_select")
 
-# 👉 2. 生成 ProgramName 選單
+# 👉 2. 生成 ProgramName 選單 (連動 OpNo)
 filtered_by_op = raw_df[raw_df['OpNo'].isin(selected_ops)] if selected_ops else raw_df
 prog_options = sorted(filtered_by_op['ProgramName'].dropna().unique().tolist())
 
@@ -184,7 +184,8 @@ valid_defaults_prog = [p for p in st.session_state.saved_progs if p in prog_opti
 with filter_col2:
     selected_progs = st.multiselect("Select Program", options=prog_options, default=valid_defaults_prog, key="prog_select_widget", on_change=update_progs)
 
-# 🌟 核心升級：根據已選的 OpNo + ProgramName，動態計算該組合下真實的資料區間
+
+# 🌟 補回動態時間軸邏輯：根據已選的 OpNo + ProgramName，動態計算該組合下真實的資料區間
 filtered_by_op_prog = filtered_by_op[filtered_by_op['ProgramName'].isin(selected_progs)] if selected_progs else filtered_by_op
 
 if not filtered_by_op_prog.empty:
@@ -193,9 +194,10 @@ if not filtered_by_op_prog.empty:
 else:
     curr_min_date, curr_max_date = global_min_date, global_max_date
 
+
 filter_col3, filter_col4 = st.columns([1, 1])
 
-# 👉 3. 選擇時間區間 (預設值被自動縮攏到 curr_min_date 與 curr_max_date)
+# 👉 3. 選擇時間區間 (預設值自動收斂到 curr_min_date 與 curr_max_date)
 with filter_col3:
     date_range = st.date_input(
         "Select Date Range (CheckIn/Out Overlap)", 
@@ -208,13 +210,14 @@ with filter_col3:
     else:
         start_date = end_date = date_range[0] if isinstance(date_range, (list, tuple)) else date_range
 
+# 👉 3.5 系統拿 (OpNo + ProgramName + 時間) 去砍資料
 mask_stage_3 = (
     (filtered_by_op_prog['CheckInTime'].dt.date <= end_date) & 
     (filtered_by_op_prog['CheckOutTime'].dt.date >= start_date)
 )
 filtered_by_op_prog_date = filtered_by_op_prog[mask_stage_3]
 
-# 👉 4. 生成 ProductNo 選單 (只顯示過濾完所有條件的產品)
+# 👉 4. 生成 ProductNo 選單 (只顯示該時間段 + 該站點 + 該程式有跑的產品)
 prod_options = sorted(filtered_by_op_prog_date['ProductNo'].dropna().unique().tolist())
 
 if 'saved_prods' not in st.session_state: st.session_state.saved_prods = []
@@ -252,6 +255,7 @@ if not selected_ops or not selected_progs or not selected_prods:
 # ==============================================================================
 # --- 3. Data Processing Engine ---
 # ==============================================================================
+# 最後把 ProductNo 與 Min Lot Size 也加入過濾，產生最終分析資料集
 mask_final = (
     filtered_by_op_prog_date['ProductNo'].isin(selected_prods) &
     (filtered_by_op_prog_date['TestQty'] >= min_lot_size)
@@ -418,32 +422,60 @@ for idx, op in enumerate(selected_ops):
 
         st.write("")
 
-        # ---------------------------------------------------------
-        # Part E: Visualizations
+       # ---------------------------------------------------------
+        # Part E: Visualizations (🌟 V32 修正：改為上下滿版排列)
         # ---------------------------------------------------------
         st.markdown("#### 4. Visualizations")
         
-        col_chart1, col_chart2 = st.columns(2)
+        # --- 圖表 1：吞吐量與目標比較 (Throughput Comparison) ---
+        fig1 = px.bar(
+            op_summary, 
+            x='Tester', 
+            y=['Avg_Gross_UPD', 'Avg_Net_UPD'], 
+            barmode='group',
+            title=f"Throughput Comparison & Target Validation ({op})",
+            labels={'value': 'Prorated Rate (UPD)', 'variable': 'Metrics', 'Tester': ''},
+            color_discrete_map={'Avg_Gross_UPD': '#1E3A8A', 'Avg_Net_UPD': '#28a745'}
+        )
+        # 加上基準線
+        fig1.add_hline(y=op_plan_val, line_dash="dash", line_color="orange", annotation_text="Planned Target", annotation_position="top right")
+        fig1.add_hline(y=op_theo_val, line_dash="dot", line_color="red", annotation_text="Theoretical Max", annotation_position="top right")
         
-        with col_chart1:
-            fig1 = px.bar(
-                op_summary, x='Tester', y=['Avg_Gross_UPD', 'Avg_Net_UPD'], barmode='group',
-                title=f"Throughput Comparison ({op})",
-                labels={'value': 'Prorated Rate (UPD)', 'variable': 'Metrics', 'Tester': ''},
-                color_discrete_map={'Avg_Gross_UPD': '#1E3A8A', 'Avg_Net_UPD': '#28a745'}
-            )
-            fig1.add_hline(y=op_plan_val, line_dash="dash", line_color="orange", annotation_text="Planned Target", annotation_position="top right")
-            fig1.add_hline(y=op_theo_val, line_dash="dot", line_color="red", annotation_text="Theoretical Max", annotation_position="top right")
-            fig1.update_layout(legend_title_text='', margin=dict(t=40, b=0, l=0, r=0), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-            st.plotly_chart(fig1, use_container_width=True)
-            
-        with col_chart2:
-            prod_summary = op_df.groupby(['Tester', 'ProductNo'])['TestQty'].sum().reset_index()
-            fig2 = px.bar(
-                prod_summary, x='Tester', y='TestQty', color='ProductNo',
-                title=f"Product Mix Volume ({op})",
-                labels={'TestQty': 'Total Insertions (Gross)', 'Tester': '', 'ProductNo': 'Product'},
-                color_discrete_sequence=px.colors.qualitative.Pastel
-            )
-            fig2.update_layout(margin=dict(t=40, b=0, l=0, r=0), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-            st.plotly_chart(fig2, use_container_width=True)
+        # 佈局優化：因為版面變寬了，圖例可以放回右上方，保持乾淨
+        fig1.update_layout(
+            legend_title_text='', 
+            margin=dict(t=50, b=20, l=10, r=10), 
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            height=400 # 設定固定高度讓視覺統一
+        )
+        st.plotly_chart(fig1, use_container_width=True)
+        
+        st.write("") # 加上一點間距
+        
+        # --- 圖表 2：產品組合分佈 (Product Mix) ---
+        prod_summary = op_df.groupby(['Tester', 'ProductNo'])['TestQty'].sum().reset_index()
+        fig2 = px.bar(
+            prod_summary, 
+            x='Tester', 
+            y='TestQty', 
+            color='ProductNo',
+            title=f"Product Mix Volume Distribution ({op})",
+            labels={'TestQty': 'Total Insertions (Gross)', 'Tester': '', 'ProductNo': 'Product'},
+            color_discrete_sequence=px.colors.qualitative.Pastel
+        )
+        
+        fig2.update_layout(
+            margin=dict(t=50, b=20, l=10, r=10), 
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            height=400 # 設定固定高度讓視覺統一
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+        
+        st.write("") # 為了與下方的 Raw Data 保持距離
+
+        # ---------------------------------------------------------
+        # Part F: Raw Data
+        # ---------------------------------------------------------
+        st.markdown("#### 5. Raw Data")
+        with st.expander(f"Click to view raw data for {op}"):
+            st.dataframe(op_df, use_container_width=True, hide_index=True)
