@@ -15,11 +15,25 @@ st.markdown("""
     .summary-card { background-color: #f8f9fa; border-left: 5px solid #28a745; padding: 15px 20px; border-radius: 6px; box-shadow: 1px 1px 4px rgba(0,0,0,0.04); text-align: left; margin-bottom: 20px; }
     .summary-title { color: #6c757d; font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;}
     .summary-value { color: #28a745; font-size: 26px; font-weight: bold; margin-top: 5px; }
-    .summary-value-small { color: #28a745; font-size: 20px; font-weight: bold; margin-top: 10px; } 
     .insight-box { background-color: #e8f4f8; border-left: 5px solid #17a2b8; padding: 15px 20px; border-radius: 4px; margin-bottom: 20px; font-size: 15px; line-height: 1.6; color: #333;}
     .insight-highlight { font-weight: bold; color: #0c5460; }
-    .stMultiSelect [data-baseweb="tag"] { max-width: 100% !important; }
-    .stMultiSelect [data-baseweb="tag"] span { white-space: normal !important; max-width: none !important; overflow: visible !important; text-overflow: clip !important; }
+    
+    /* 🌟 修改 Multiselect 標籤顏色 (移除預設紅色，改為淺藍系) */
+    .stMultiSelect [data-baseweb="tag"] { 
+        max-width: 100% !important; 
+        background-color: #e6f2ff !important;
+        color: #0056b3 !important;
+        border: 1px solid #b8daff !important;
+    }
+    .stMultiSelect [data-baseweb="tag"] span { 
+        white-space: normal !important; 
+        max-width: none !important; 
+        overflow: visible !important; 
+        text-overflow: clip !important; 
+    }
+    .stMultiSelect [data-baseweb="tag"] svg {
+        fill: #0056b3 !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -83,13 +97,13 @@ if raw_df is None or raw_df.empty:
 # ==============================================================================
 # --- 1. Main Area: Filters & Help Section ---
 # ==============================================================================
-with st.expander("ℹ️ Help: Formula & Parameter Definitions (公式與參數定義)"):
+# 🌟 修改 Help 標題為純英文
+with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
     st.markdown("""
     This system employs rigorous Industrial Engineering (IE) logic combined with actual production report data to calculate authentic equipment efficiency. Metric definitions are as follows:
 
     #### 1. Capacity Metrics (Tester View vs. Product View)
     * **Total Insertions (Gross):** Total testing actions performed by the testers across all operations. It evaluates the physical workload on the testers (allows double-counting across ops).
-    * **Est. Physical Units:** Estimated actual ICs processed, calculated by de-duplicating `LotNo` and taking the max input quantity across operations.
     * **Active Days:** The exact number of hours a tester spent in the "Testing" state (CheckIn to CheckOut), divided by 24 hours.
     * **Gross UPD (Prorated 24h Rate):** Calculated as `Total TestQty / Active Days`. 
       * *Note on Proration:* This is a **SPEED metric**, not a volume metric. If a tester tests 6,000 units in exactly 12 hours, its 24-hour prorated UPD is 12,000 ea/day.
@@ -122,7 +136,6 @@ with filter_col1:
 filtered_by_op = raw_df[raw_df['OpNo'].isin(selected_ops)] if selected_ops else raw_df
 prog_options = sorted(filtered_by_op['ProgramName'].dropna().unique().tolist())
 
-# 🌟 核心修正 2：使用 Callback 避免閃爍 Bug
 if 'saved_progs' not in st.session_state:
     st.session_state.saved_progs = []
 
@@ -143,25 +156,25 @@ with filter_col2:
 st.divider()
 
 # ==============================================================================
-# --- 2. Sidebar Settings (🌟 核心修正 1：移至 st.stop 之前，確保不會消失) ---
+# --- 2. Sidebar Settings (Dynamic Targets per OpNo) ---
 # ==============================================================================
 st.sidebar.header("⚙️ Data Cleaning Rules")
 min_lot_size = st.sidebar.number_input("Exclude Lots smaller than (Qty)", value=0, step=100)
 
 st.sidebar.divider()
 st.sidebar.header("📐 Planning & Targets")
-st.sidebar.caption("Define specific baselines for EACH selected operation.")
+st.sidebar.markdown("<p style='color: #444; font-size: 13px;'>Define specific baselines for EACH selected operation.</p>", unsafe_allow_html=True)
 
 targets = {}
 if selected_ops:
     for op in selected_ops:
         st.sidebar.markdown(f"**🔹 Operation: {op}**")
-        theo = st.sidebar.number_input(f"Theo Max UPD ({op})", value=20000, step=500, key=f"theo_{op}")
-        plan = st.sidebar.number_input(f"Planned Target ({op})", value=18000, step=500, key=f"plan_{op}")
+        # 🌟 修改預設值為 4240 與 2800
+        theo = st.sidebar.number_input(f"Theo Max UPD ({op})", value=4240, step=10, key=f"theo_{op}")
+        plan = st.sidebar.number_input(f"Planned Target ({op})", value=2800, step=100, key=f"plan_{op}")
         targets[op] = {'theo': theo, 'plan': plan}
         st.sidebar.write("") 
 
-# 防呆檢查移至此處，確保側邊欄先渲染完畢
 if not selected_ops or not selected_progs:
     st.info("👆 Please select **OpNo** and **ProgramName** above to generate the report.")
     st.stop()
@@ -212,7 +225,7 @@ tester_summary = tester_summary.sort_values(by=['OpNo', 'Tester'], ascending=Tru
 # --- 4. Dashboard UI ---
 # ==============================================================================
 st.markdown("## ATE Tester Capacity Analysis & Validation")
-st.caption("Select an Operation tab below to view its isolated performance and capacity planning insights.")
+st.markdown("<p style='color: #444; font-size: 14px;'>Select an Operation tab below to view its isolated performance and capacity planning insights.</p>", unsafe_allow_html=True)
 
 tabs = st.tabs(selected_ops)
 
@@ -228,32 +241,25 @@ for idx, op in enumerate(selected_ops):
             continue
         
         # ---------------------------------------------------------
-        # Part A: Overall Performance (For this specific Operation)
+        # Part A: Overall Performance 
         # ---------------------------------------------------------
         st.markdown("#### 📊 Overall Performance")
         
         total_insertions = int(op_summary['Total_TestQty'].sum())
         total_pass_insertions = int(op_summary['Total_PassQty'].sum())
         avg_step_yield = (total_pass_insertions / total_insertions) * 100 if total_insertions > 0 else 0
-        
-        unique_lots_df = op_df.groupby('LotNo').agg(Max_TestQty=('TestQty', 'max')).reset_index()
-        physical_lots = len(unique_lots_df)
-        physical_units = int(unique_lots_df['Max_TestQty'].sum())
         active_testers = op_summary['Tester'].nunique()
 
         c1, c2, c3, c4 = st.columns(4)
+        # 🌟 簡化 KPI 卡片，移除小灰字以提升對比與整潔度
         with c1: 
-            st.markdown(f"""<div class='kpi-card'><div class='kpi-title'>Total Insertions (Gross)</div><div class='kpi-value'>{total_insertions:,}</div>
-                <div style='font-size: 12px; color: #888; margin-top: 5px;'>Est. Physical Units: ~{physical_units:,}</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Total Insertions (Gross)</div><div class='kpi-value'>{total_insertions:,}</div></div>", unsafe_allow_html=True)
         with c2: 
-            st.markdown(f"""<div class='kpi-card'><div class='kpi-title'>Pass Insertions (Net)</div><div class='kpi-value'>{total_pass_insertions:,}</div>
-                <div style='font-size: 12px; color: #888; margin-top: 5px;'>Total Lots: {physical_lots}</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Pass Insertions (Net)</div><div class='kpi-value'>{total_pass_insertions:,}</div></div>", unsafe_allow_html=True)
         with c3: 
-            st.markdown(f"""<div class='kpi-card'><div class='kpi-title'>Avg Step Yield</div><div class='kpi-value'>{avg_step_yield:.2f}%</div>
-                <div style='font-size: 12px; color: #888; margin-top: 5px;'>Operation Level Yield</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Avg Step Yield</div><div class='kpi-value'>{avg_step_yield:.2f}%</div></div>", unsafe_allow_html=True)
         with c4: 
-            st.markdown(f"""<div class='kpi-card'><div class='kpi-title'>Active Testers</div><div class='kpi-value'>{active_testers}</div>
-                <div style='font-size: 12px; color: #888; margin-top: 5px;'>For Operation: {op}</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Active Testers</div><div class='kpi-value'>{active_testers}</div></div>", unsafe_allow_html=True)
 
         st.divider()
 
@@ -261,7 +267,7 @@ for idx, op in enumerate(selected_ops):
         # Part B: Period Performance Summary
         # ---------------------------------------------------------
         st.markdown("#### 1. Period Performance Summary")
-        st.caption(f"Note: 'Avg Rate' is a 24-hour prorated speed. This represents the weighted average for {op}.")
+        st.markdown("<p style='color: #444; font-size: 14px;'>Note: 'Avg Rate' is a 24-hour prorated speed. This represents the weighted average for the operation.</p>", unsafe_allow_html=True)
         
         total_op_days = op_summary['Active_Days'].sum()
         global_gross_upd = (total_insertions / total_op_days) if total_op_days > 0 else 0
@@ -308,7 +314,7 @@ for idx, op in enumerate(selected_ops):
         st.write("")
 
         # ---------------------------------------------------------
-        # Part D: Tester Performance Details
+        # Part D: Tester Performance Details (Table with Highlight)
         # ---------------------------------------------------------
         st.markdown("#### 3. Tester Performance Details (A/P/Q Breakdown)")
         
@@ -332,7 +338,18 @@ for idx, op in enumerate(selected_ops):
         display_df['Availability (A)'] = display_df['Availability (A)'].apply(lambda x: f"{x*100:.1f}%")
         display_df['Performance (P)'] = display_df['Performance (P)'].apply(lambda x: f"{x*100:.1f}%")
 
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        # 🌟 新增：針對低於預期的 OEE 進行標示 (紅色字體與淺紅背景)
+        def highlight_low_oee(val, threshold):
+            try:
+                num_val = float(val.strip('%'))
+                if num_val < threshold:
+                    return 'background-color: #ffebee; color: #dc3545; font-weight: bold;'
+            except:
+                pass
+            return ''
+        
+        styled_df = display_df.style.map(lambda x: highlight_low_oee(x, implied_oee), subset=['Avg OEE'])
+        st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
         st.write("")
 
