@@ -32,19 +32,28 @@ def generate_mock_data():
     now = datetime.now()
     data = []
     testers = [f"HP93K-EXA{i:02d}" for i in range(2, 10)]
+    ops = ["FT1", "FTA", "MT1"]
+    programs_map = {"FT1": ["PROD_GS631_FT1_REV1"], "FTA": ["PROD_GS631_FTA_REV1"], "MT1": ["PROD_GS631_MT1_REV1"]}
     tester_clocks = {tester: now - timedelta(days=20) for tester in testers}
     
     for i in range(150):
         tester = np.random.choice(testers)
+        op = np.random.choice(ops)
+        prog = np.random.choice(programs_map[op])
+        
         wait_time = timedelta(hours=np.random.uniform(0.5, 3))
         start_time = tester_clocks[tester] + wait_time
         test_duration = timedelta(hours=np.random.uniform(6, 14))
         end_time = start_time + test_duration
-        qty = np.random.randint(5000, 15000)
+        
+        if op == "FT1": qty = np.random.randint(3000, 5000)
+        elif op == "FTA": qty = np.random.randint(5000, 8000)
+        else: qty = np.random.randint(15000, 25000)
+        
         yield_rate = np.random.uniform(0.95, 0.99)
         pass_qty = int(qty * yield_rate)
         
-        data.append([f"LOT_{i:04d}", "FT1", "PROD_GS631_ZC13...", tester, start_time, end_time, qty, pass_qty])
+        data.append([f"LOT_{i:04d}", op, prog, tester, start_time, end_time, qty, pass_qty])
         tester_clocks[tester] = end_time
         
     return pd.DataFrame(data, columns=['LotNo', 'OpNo', 'ProgramName', 'Tester', 'CheckInTime', 'CheckOutTime', 'TestQty', 'PassQty'])
@@ -64,10 +73,6 @@ def load_data(file):
             return None
     return generate_mock_data()
 
-# ==============================================================================
-# --- 1. Sidebar Settings ---
-# ==============================================================================
-st.sidebar.header("📁 1. Data Input")
 uploaded_file = st.sidebar.file_uploader("Upload Yield Report (Excel)", type=["xlsx", "xls"])
 raw_df = load_data(uploaded_file)
 
@@ -75,21 +80,10 @@ if raw_df is None or raw_df.empty:
     st.warning("No data available.")
     st.stop()
 
-st.sidebar.divider()
-st.sidebar.header("⚙️ 2. Data Cleaning Rules")
-min_lot_size = st.sidebar.number_input("Exclude Lots smaller than (Qty)", value=0, step=100)
-
-st.sidebar.divider()
-st.sidebar.header("📐 3. Planning & Targets")
-st.sidebar.caption("Define baselines for Capacity Planning.")
-theo_max_upd = st.sidebar.number_input("Theoretical Max UPD (100% OEE)", value=20000, step=500)
-planned_upd = st.sidebar.number_input("Planned Target UPD", value=19000, step=500)
-
 # ==============================================================================
-# --- 2. Main Area: Help Section & Filters ---
+# --- 1. Main Area: Filters & Unabridged Help Section ---
 # ==============================================================================
-
-# 🌟 完整恢復：最詳盡的 A/P/Q 定義與公式說明
+# 🌟 保證一字不漏的完整版 Help 說明
 with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
     st.markdown("""
     This system employs rigorous Industrial Engineering (IE) logic combined with actual production report data to calculate authentic equipment efficiency. Metric definitions are as follows:
@@ -138,6 +132,24 @@ if not selected_ops or not selected_progs:
 st.divider()
 
 # ==============================================================================
+# --- 2. Sidebar Settings (Dynamic Targets per OpNo) ---
+# ==============================================================================
+st.sidebar.header("⚙️ Data Cleaning Rules")
+min_lot_size = st.sidebar.number_input("Exclude Lots smaller than (Qty)", value=0, step=100)
+
+st.sidebar.divider()
+st.sidebar.header("📐 Planning & Targets")
+st.sidebar.caption("Define specific baselines for EACH selected operation.")
+
+targets = {}
+for op in selected_ops:
+    st.sidebar.markdown(f"**🔹 Operation: {op}**")
+    theo = st.sidebar.number_input(f"Theoretical Max UPD (100% OEE)", value=4240, step=10, key=f"theo_{op}")
+    plan = st.sidebar.number_input(f"Planned Target UPD", value=2800, step=100, key=f"plan_{op}")
+    targets[op] = {'theo': theo, 'plan': plan}
+    st.sidebar.write("") 
+
+# ==============================================================================
 # --- 3. Data Processing Engine ---
 # ==============================================================================
 filtered_df = raw_df[
@@ -152,7 +164,7 @@ if filtered_df.empty:
 
 filtered_df['Duration_Hr'] = (filtered_df['CheckOutTime'] - filtered_df['CheckInTime']).dt.total_seconds() / 3600.0
 
-tester_summary = filtered_df.groupby('Tester').agg(
+tester_summary = filtered_df.groupby(['Tester', 'OpNo']).agg(
     Lot_Count=('LotNo', 'nunique'),
     Total_TestQty=('TestQty', 'sum'),
     Total_PassQty=('PassQty', 'sum'),
@@ -168,21 +180,21 @@ tester_summary['Avg_Net_UPD'] = np.where(tester_summary['Active_Days'] > 0, test
 tester_summary['Calendar_Span_Days'] = (tester_summary['Max_CheckOut'] - tester_summary['Min_CheckIn']).dt.total_seconds() / (24.0 * 3600.0)
 tester_summary['Availability (A)'] = np.where(tester_summary['Calendar_Span_Days'] > 0, tester_summary['Active_Days'] / tester_summary['Calendar_Span_Days'], 0)
 
-theo_uph = theo_max_upd / 24.0
+tester_summary['Theo_Max_UPD'] = tester_summary['OpNo'].map(lambda x: targets[x]['theo'])
+tester_summary['Planned_UPD'] = tester_summary['OpNo'].map(lambda x: targets[x]['plan'])
+
 tester_summary['Actual_UPH'] = np.where(tester_summary['Total_Duration_Hr'] > 0, tester_summary['Total_TestQty'] / tester_summary['Total_Duration_Hr'], 0)
-tester_summary['Performance (P)'] = tester_summary['Actual_UPH'] / theo_uph
+tester_summary['Performance (P)'] = tester_summary['Actual_UPH'] / (tester_summary['Theo_Max_UPD'] / 24.0)
 
 tester_summary['Yield (Q)'] = np.where(tester_summary['Total_TestQty'] > 0, tester_summary['Total_PassQty'] / tester_summary['Total_TestQty'], 0)
-tester_summary['Avg_OEE'] = tester_summary['Avg_Gross_UPD'] / theo_max_upd
-tester_summary = tester_summary.sort_values(by='Tester', ascending=True)
+tester_summary['Avg_OEE'] = tester_summary['Avg_Gross_UPD'] / tester_summary['Theo_Max_UPD']
+
+tester_summary = tester_summary.sort_values(by=['OpNo', 'Tester'], ascending=True)
 
 # ==============================================================================
 # --- 4. Dashboard UI ---
 # ==============================================================================
 
-# ---------------------------------------------------------
-# Part A: Overall Performance
-# ---------------------------------------------------------
 st.markdown("### 📊 Overall Performance")
 total_test = int(tester_summary['Total_TestQty'].sum())
 total_pass = int(tester_summary['Total_PassQty'].sum())
@@ -197,92 +209,76 @@ with c3: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Overall Yiel
 with c4: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Active Testers</div><div class='kpi-value'>{active_testers}</div></div>", unsafe_allow_html=True)
 
 st.divider()
-
-# ---------------------------------------------------------
-# Part B: Period Performance Summary
-# ---------------------------------------------------------
 st.markdown("## ATE Tester Capacity Analysis & Validation")
-avg_gross_upd = tester_summary['Avg_Gross_UPD'].mean()
-avg_net_upd = tester_summary['Avg_Net_UPD'].mean()
-avg_oee = tester_summary['Avg_OEE'].mean() * 100
 
+# ---------------------------------------------------------
+# 1. Period Performance Summary
+# ---------------------------------------------------------
 st.markdown("#### 1. Period Performance Summary")
 st.caption(f"A total of {valid_lots_count} valid lots were tested (excluding lots < {min_lot_size} ea). Data is prorated based on exact active hours.")
 
+global_gross_upd = tester_summary['Avg_Gross_UPD'].mean()
+global_net_upd = tester_summary['Avg_Net_UPD'].mean()
+global_theo_qty = (tester_summary['Active_Days'] * tester_summary['Theo_Max_UPD']).sum()
+global_oee = (total_test / global_theo_qty) * 100 if global_theo_qty > 0 else 0
+
 sc1, sc2, sc3 = st.columns(3)
-with sc1: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Actual UPD (TestQty)</div><div class='summary-value'>{avg_gross_upd:,.0f}</div></div>", unsafe_allow_html=True)
-with sc2: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Effective UPD (PassQty)</div><div class='summary-value'>{avg_net_upd:,.0f}</div></div>", unsafe_allow_html=True)
-with sc3: st.markdown(f"<div class='summary-card'><div class='summary-title'>Overall OEE</div><div class='summary-value'>{avg_oee:.1f}%</div></div>", unsafe_allow_html=True)
+with sc1: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Actual UPD (TestQty)</div><div class='summary-value'>{global_gross_upd:,.0f}</div></div>", unsafe_allow_html=True)
+with sc2: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Effective UPD (PassQty)</div><div class='summary-value'>{global_net_upd:,.0f}</div></div>", unsafe_allow_html=True)
+with sc3: st.markdown(f"<div class='summary-card'><div class='summary-title'>Overall OEE</div><div class='summary-value'>{global_oee:.1f}%</div></div>", unsafe_allow_html=True)
 
-st.write("") # Spacer
+st.write("") 
 
 # ---------------------------------------------------------
-# Part C: Insights & Visualizations (Side by Side)
+# 2. Capacity Planning Insights
 # ---------------------------------------------------------
-col_insight, col_chart = st.columns([1, 1.2])
+st.markdown("#### 2. Capacity Planning Insights")
+st.caption("Insights are generated specifically for each selected operation based on its unique targets.")
 
-with col_insight:
-    st.markdown("#### 2. Capacity Planning Insights")
-    buffer_pct = ((avg_gross_upd - planned_upd) / avg_gross_upd) * 100 if avg_gross_upd > 0 else 0
-    implied_oee = (planned_upd / theo_max_upd) * 100 if theo_max_upd > 0 else 0
+for op in selected_ops:
+    op_summary = tester_summary[tester_summary['OpNo'] == op]
+    if op_summary.empty: continue
+    
+    avg_op_upd = op_summary['Avg_Gross_UPD'].mean()
+    op_theo = targets[op]['theo']
+    op_plan = targets[op]['plan']
+    
+    buffer_pct = ((avg_op_upd - op_plan) / avg_op_upd) * 100 if avg_op_upd > 0 else 0
+    implied_oee = (op_plan / op_theo) * 100 if op_theo > 0 else 0
 
-    if avg_gross_upd >= planned_upd:
+    st.markdown(f"**🔹 Operation: {op}**")
+    if avg_op_upd >= op_plan:
         insight_text = f"""
-        Validation shows the current ATE Tester actual average capacity is approx. <span class='insight-highlight'>{avg_gross_upd:,.0f} ea/day</span>, surpassing your planned target of <span class='insight-highlight'>{planned_upd:,.0f}</span>.<br>
-        Using {planned_upd:,.0f} as your Capacity Planning baseline is a safe setting, preserving a <span class='insight-highlight'>{buffer_pct:.1f}%</span> capacity buffer.
+        Validation shows the current <span class='insight-highlight'>{op}</span> actual average capacity is approx. <span class='insight-highlight'>{avg_op_upd:,.0f} ea/day</span>, surpassing your planned target of <span class='insight-highlight'>{op_plan:,.0f}</span>.<br>
+        Using {op_plan:,.0f} as your baseline is a safe setting, preserving a <span class='insight-highlight'>{buffer_pct:.1f}%</span> capacity buffer.
         """
     else:
         insight_text = f"""
-        ⚠️ <b>Notice:</b> The current actual average capacity is approx. <span class='insight-highlight'>{avg_gross_upd:,.0f} ea/day</span>, which is <b>below</b> your planned target of <span class='insight-highlight'>{planned_upd:,.0f}</span>.<br>
-        It is recommended to lower the planning baseline or investigate the production line for abnormal downtime causing the shortfall.
+        ⚠️ <b>Notice:</b> The current <span class='insight-highlight'>{op}</span> actual average capacity is approx. <span class='insight-highlight'>{avg_op_upd:,.0f} ea/day</span>, which is <b>below</b> your planned target of <span class='insight-highlight'>{op_plan:,.0f}</span>.<br>
+        It is recommended to lower the planning baseline or investigate for abnormal downtime causing the shortfall.
         """
     st.markdown(f"<div class='insight-box'>{insight_text}</div>", unsafe_allow_html=True)
 
     insight_data = {
-        "Metric": ["Report Avg UPD (Gross)", "Planned Target UPD", "Theoretical Max UPD", f"Implied OEE (at {planned_upd})"],
-        "Value": [f"{avg_gross_upd:,.0f}", f"{planned_upd:,.0f}", f"{theo_max_upd:,.0f}", f"{implied_oee:.1f}%"],
-        "Note": ["Actual performance", "Scheduling safety level", "100% OEE (Ideal)", "Assumed buffer"]
+        "Metric": ["Report Avg UPD (Gross)", "Planned Target UPD", "Theoretical Max UPD", f"Implied OEE (at {op_plan})"],
+        "Value": [f"{avg_op_upd:,.0f}", f"{op_plan:,.0f}", f"{op_theo:,.0f}", f"{implied_oee:.1f}%"]
     }
-    st.dataframe(pd.DataFrame(insight_data), use_container_width=True, hide_index=True)
-
-with col_chart:
-    st.markdown("#### 3. Tester Throughput Comparison")
-    
-    fig = px.bar(
-        tester_summary, 
-        x='Tester', 
-        y=['Avg_Gross_UPD', 'Avg_Net_UPD'],
-        barmode='group',
-        labels={'value': 'Units Per Day (UPD)', 'variable': 'Metrics', 'Tester': ''},
-        color_discrete_map={'Avg_Gross_UPD': '#1E3A8A', 'Avg_Net_UPD': '#28a745'}
-    )
-    
-    fig.add_hline(y=planned_upd, line_dash="dash", line_color="orange", 
-                  annotation_text="Planned Target", annotation_position="top right")
-    fig.add_hline(y=theo_max_upd, line_dash="dot", line_color="red", 
-                  annotation_text="Theoretical Max", annotation_position="top right")
-    
-    fig.update_layout(
-        legend_title_text='',
-        margin=dict(t=20, b=0, l=0, r=0),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
+    st.dataframe(pd.DataFrame(insight_data).T, use_container_width=True) 
+    st.write("")
 
 # ---------------------------------------------------------
-# Part D: Tester Summary Table (Reordered)
+# 3. Tester Performance Details (Table)
 # ---------------------------------------------------------
-st.markdown("#### 4. Tester Performance Details (A/P/Q Breakdown)")
+st.markdown("#### 3. Tester Performance Details (A/P/Q Breakdown)")
 
 display_df = tester_summary[[
-    'Tester', 'Lot_Count', 'Yield (Q)', 
+    'Tester', 'OpNo', 'Lot_Count', 'Yield (Q)', 
     'Avg_Gross_UPD', 'Avg_Net_UPD', 'Avg_OEE',
     'Active_Days', 'Availability (A)', 'Performance (P)'
 ]].copy()
 
 display_df = display_df.rename(columns={
-    'Tester': 'Tester', 'Lot_Count': 'Lot Count', 'Yield (Q)': 'Yield (Q)',
+    'Tester': 'Tester', 'OpNo': 'Operation', 'Lot_Count': 'Lot Count', 'Yield (Q)': 'Yield (Q)',
     'Avg_Gross_UPD': 'Avg UPD (TestQty)', 'Avg_Net_UPD': 'Avg UPD (PassQty)', 'Avg_OEE': 'Avg OEE',
     'Active_Days': 'Active Days', 'Availability (A)': 'Availability (A)', 'Performance (P)': 'Performance (P)'
 })
@@ -296,3 +292,40 @@ display_df['Availability (A)'] = display_df['Availability (A)'].apply(lambda x: 
 display_df['Performance (P)'] = display_df['Performance (P)'].apply(lambda x: f"{x*100:.1f}%")
 
 st.dataframe(display_df, use_container_width=True, hide_index=True)
+st.write("")
+
+# ---------------------------------------------------------
+# 4. Tester Throughput Comparison (Charts)
+# ---------------------------------------------------------
+st.markdown("#### 4. Tester Throughput Comparison")
+st.caption("Visual gap analysis between Actual Output, Planned Target, and Theoretical Max.")
+
+for op in selected_ops:
+    op_summary = tester_summary[tester_summary['OpNo'] == op]
+    if op_summary.empty: continue
+    
+    op_theo = targets[op]['theo']
+    op_plan = targets[op]['plan']
+    
+    fig = px.bar(
+        op_summary, 
+        x='Tester', 
+        y=['Avg_Gross_UPD', 'Avg_Net_UPD'],
+        barmode='group',
+        title=f"Throughput Comparison for Operation: {op}",
+        labels={'value': 'Units Per Day (UPD)', 'variable': 'Metrics', 'Tester': ''},
+        color_discrete_map={'Avg_Gross_UPD': '#1E3A8A', 'Avg_Net_UPD': '#28a745'}
+    )
+    
+    fig.add_hline(y=op_plan, line_dash="dash", line_color="orange", 
+                  annotation_text="Planned Target", annotation_position="top right")
+    fig.add_hline(y=op_theo, line_dash="dot", line_color="red", 
+                  annotation_text="Theoretical Max", annotation_position="top right")
+    
+    fig.update_layout(
+        legend_title_text='',
+        margin=dict(t=40, b=0, l=0, r=0),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
