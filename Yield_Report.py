@@ -5,10 +5,10 @@ from datetime import datetime, timedelta, time
 
 st.set_page_config(page_title="ATE Tester Capacity Analysis", layout="wide")
 
-# --- Custom CSS (Preserving KPI Cards and Green Highlight) ---
+# --- Custom CSS (Added new styles for Sub-KPI cards) ---
 st.markdown("""
     <style>
-    /* KPI Card Style */
+    /* Top KPI Card Style */
     .kpi-card {
         background-color: #ffffff;
         border: 1px solid #e0e0e0;
@@ -21,9 +21,19 @@ st.markdown("""
     .kpi-title { color: #6c757d; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;}
     .kpi-value { color: #1E3A8A; font-size: 32px; font-weight: bold; margin-top: 10px; }
     
-    /* Summary Text Style */
-    .summary-text { font-size: 16px; line-height: 2.2; }
-    .highlight-val { color: #28a745; font-weight: bold; font-size: 18px;}
+    /* Sub-KPI Card Style for Key Analysis */
+    .summary-card {
+        background-color: #f8f9fa;
+        border-left: 5px solid #28a745;
+        padding: 15px 20px;
+        border-radius: 6px;
+        box-shadow: 1px 1px 4px rgba(0,0,0,0.04);
+        text-align: left;
+        margin-bottom: 20px;
+    }
+    .summary-title { color: #6c757d; font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;}
+    .summary-value { color: #28a745; font-size: 26px; font-weight: bold; margin-top: 5px; }
+    .summary-value-small { color: #28a745; font-size: 20px; font-weight: bold; margin-top: 10px; } /* For Range text */
     </style>
 """, unsafe_allow_html=True)
 
@@ -44,7 +54,6 @@ def generate_mock_data():
         "FT2": ["PVT", "MP"]
     }
     
-    # Extended to 21 days back to demonstrate actual weekly (UPW) logic
     for i in range(200):
         tester = np.random.choice(testers)
         op = np.random.choice(ops)
@@ -120,13 +129,13 @@ filter_col1, filter_col2 = st.columns(2)
 
 with filter_col1:
     op_options = sorted(raw_df['OpNo'].dropna().unique().tolist())
-    selected_ops = st.multiselect("Select Operation (OpNo)", options=op_options, default=op_options)
+    selected_ops = st.multiselect("Select Operation (OpNo)", options=op_options)
 
 filtered_by_op = raw_df[raw_df['OpNo'].isin(selected_ops)] if selected_ops else raw_df
 prog_options = sorted(filtered_by_op['ProgramName'].dropna().unique().tolist())
 
 with filter_col2:
-    selected_progs = st.multiselect("Select Program (ProgramName)", options=prog_options, default=prog_options)
+    selected_progs = st.multiselect("Select Program (ProgramName)", options=prog_options)
 
 if not selected_ops or not selected_progs:
     st.info("👆 Please select **OpNo** and **ProgramName** above to generate the report.")
@@ -235,24 +244,23 @@ tester_summary = daily_stats.groupby('Tester').agg(
     Avg_OEE=('Daily_OEE', 'mean')
 ).reset_index()
 
-# 🌟 NEW LOGIC: Real UPW Calculation
-# Group by Tester and Calendar Week (W ends on Sunday)
+# Real UPW Calculation
 weekly_stats = df_split.groupby(['Tester', pd.Grouper(key='ProductionDate', freq='W')]).agg(
     Weekly_UPW=('ApportionedQty', 'sum')
 ).reset_index()
 
-# Average the actual weekly throughputs per tester
 avg_weekly = weekly_stats.groupby('Tester').agg(
     Real_UPW=('Weekly_UPW', 'mean')
 ).reset_index()
 
-# Merge Real UPW into the main summary table
 tester_summary = tester_summary.merge(avg_weekly, on='Tester', how='left')
 
 # Get Lot Counts
 lot_counts = filtered_df.groupby('Tester')['LotNo'].nunique().reset_index().rename(columns={'LotNo': 'Lots'})
 tester_summary = tester_summary.merge(lot_counts, on='Tester', how='left')
-tester_summary = tester_summary.sort_values(by='Avg_UPD', ascending=False)
+
+# Sort by Tester ascending
+tester_summary = tester_summary.sort_values(by='Tester', ascending=True)
 
 # Global Summary Aggregation
 avg_actual_upd = tester_summary['Avg_UPD'].mean()
@@ -261,18 +269,20 @@ avg_actual_oee = tester_summary['Avg_OEE'].mean() * 100
 max_upd, min_upd = tester_summary['Avg_UPD'].max(), tester_summary['Avg_UPD'].min()
 
 st.markdown("#### 1. Key Analysis Summary")
-st.markdown(f"""
-<div class='summary-text'>
-<ul>
-    <li><b>Avg Actual UPD:</b> <span class='highlight-val'>{avg_actual_upd:,.0f}</span></li>
-    <li><b>Real Avg UPW:</b> <span class='highlight-val'>{avg_actual_upw:,.0f}</span></li>
-    <li><b>Avg OEE:</b> <span class='highlight-val'>{avg_actual_oee:.1f}%</span></li>
-    <li><b>UPD Range:</b> <span class='highlight-val'>{min_upd:,.0f} ~ {max_upd:,.0f}</span></li>
-</ul>
-</div>
-""", unsafe_allow_html=True)
 
-st.markdown("<br>", unsafe_allow_html=True)
+# 🌟 NEW: Summary Sub-KPI Cards Design
+sc1, sc2, sc3, sc4 = st.columns(4)
+
+with sc1:
+    st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Actual UPD</div><div class='summary-value'>{avg_actual_upd:,.0f}</div></div>", unsafe_allow_html=True)
+with sc2:
+    st.markdown(f"<div class='summary-card'><div class='summary-title'>Real Avg UPW</div><div class='summary-value'>{avg_actual_upw:,.0f}</div></div>", unsafe_allow_html=True)
+with sc3:
+    st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg OEE</div><div class='summary-value'>{avg_actual_oee:.1f}%</div></div>", unsafe_allow_html=True)
+with sc4:
+    # Use smaller font for range so it fits nicely
+    st.markdown(f"<div class='summary-card'><div class='summary-title'>UPD Range</div><div class='summary-value-small'>{min_upd:,.0f} ~ {max_upd:,.0f}</div></div>", unsafe_allow_html=True)
+
 
 # ---------------------------------------------------------
 # Part C: Tester Summary Table
