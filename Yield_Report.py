@@ -15,11 +15,8 @@ st.markdown("""
     .summary-title { color: #6c757d; font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;}
     .summary-value { color: #28a745; font-size: 26px; font-weight: bold; margin-top: 5px; }
     .summary-value-small { color: #28a745; font-size: 20px; font-weight: bold; margin-top: 10px; } 
-    
-    /* Notification/Insight Box Style */
     .insight-box { background-color: #e8f4f8; border-left: 5px solid #17a2b8; padding: 15px 20px; border-radius: 4px; margin-bottom: 20px; font-size: 15px; line-height: 1.6; color: #333;}
     .insight-highlight { font-weight: bold; color: #0c5460; }
-    
     .stMultiSelect [data-baseweb="tag"] { max-width: 100% !important; }
     .stMultiSelect [data-baseweb="tag"] span { white-space: normal !important; max-width: none !important; overflow: visible !important; text-overflow: clip !important; }
     </style>
@@ -34,21 +31,20 @@ def generate_mock_data():
     now = datetime.now()
     data = []
     testers = [f"HP93K-EXA{i:02d}" for i in range(2, 17)]
-    ops = ["FT1"]
-    programs_map = {"FT1": ["PROD_GS631_Z..."]}
+    tester_clocks = {tester: now - timedelta(days=20) for tester in testers}
     
-    for i in range(150):
+    for i in range(200):
         tester = np.random.choice(testers)
-        op = np.random.choice(ops)
-        prog = np.random.choice(programs_map[op])
-        qty = np.random.randint(100, 5000)
-        yield_rate = np.random.uniform(0.85, 0.99)
+        wait_time = timedelta(hours=np.random.uniform(0.5, 3))
+        start_time = tester_clocks[tester] + wait_time
+        test_duration = timedelta(hours=np.random.uniform(6, 14))
+        end_time = start_time + test_duration
+        qty = np.random.randint(1500, 3500)
+        yield_rate = np.random.uniform(0.90, 0.99)
         pass_qty = int(qty * yield_rate)
         
-        start_time = now - timedelta(days=np.random.randint(0, 10), hours=np.random.randint(0, 24))
-        end_time = start_time + timedelta(hours=np.random.uniform(1, 10)) 
-        
-        data.append([f"LOT_{i:04d}", op, prog, tester, start_time, end_time, qty, pass_qty])
+        data.append([f"LOT_{i:04d}", "FT1", "PROD_GS631_ZC13...", tester, start_time, end_time, qty, pass_qty])
+        tester_clocks[tester] = end_time
         
     return pd.DataFrame(data, columns=['LotNo', 'OpNo', 'ProgramName', 'Tester', 'CheckInTime', 'CheckOutTime', 'TestQty', 'PassQty'])
 
@@ -81,18 +77,46 @@ if raw_df is None or raw_df.empty:
 st.sidebar.divider()
 st.sidebar.header("⚙️ 2. Data Cleaning Rules")
 min_lot_size = st.sidebar.number_input("Exclude Lots smaller than (Qty)", value=500, step=100)
-cutoff_hour = st.sidebar.slider("Daily Cutoff Time (Hour)", min_value=0, max_value=23, value=0)
 
 st.sidebar.divider()
 st.sidebar.header("📐 3. Planning & Targets")
 st.sidebar.caption("Define baselines for Capacity Planning.")
 theo_max_upd = st.sidebar.number_input("Theoretical Max UPD (100% OEE)", value=4240, step=10)
-# 🌟 NEW: 加入使用者的規劃基準
-planned_upd = st.sidebar.number_input("Planned Target UPD", value=2800, step=100, help="產能規劃時使用的安全基準值")
+planned_upd = st.sidebar.number_input("Planned Target UPD", value=2800, step=100)
 
 # ==============================================================================
-# --- 2. Main Area Filters ---
+# --- 2. Main Area: Help Section & Filters ---
 # ==============================================================================
+
+# 🌟 NEW: 完整的中文定義說明展開區塊
+with st.expander("ℹ️ Help: 參數定義與計算公式 (Formula & Definitions)"):
+    st.markdown("""
+    本系統採用嚴謹的 IE (工業工程) 邏輯，結合產線實際報表數據，推算出最真實的機台效率。各項指標定義如下：
+
+    #### 1. 產能指標 (Capacity Metrics)
+    * **Gross UPD (實際吞吐量):** 採用 `TestQty` 計算，代表機台實際測試過的總顆數（包含良品與不良品）。此數據用來評估機台的「純生產速度」。
+    * **Net UPD (有效良品量):** 採用 `PassQty` 計算，代表機台產出的有效良品數。
+    * **運轉天數 (Active Days):** 機台在選定期間內，處於「正在測試中 (CheckIn ~ CheckOut)」的總時數除以 24 小時。
+    * **計算公式 (精準平均):** `Avg UPD = 期間內總顆數 / Active Days`。此算法排除了「零碎未滿一天」造成的平均值誤差。
+
+    #### 2. OEE 設備綜合效率拆解 (Availability, Performance, Quality)
+    本系統採用 Top-Down 產出導向與傳統 A/P/Q 雙軌驗證，確保數據準確度。
+    * **A (稼動率 / Availability):** 衡量機台有多常在生產。
+      * `計算 = 實際運轉天數 (Active Days) / 報表首尾跨越的日曆天數 (Calendar Span)`
+    * **P (產能效率 / Performance):** 衡量機台運作時，有沒有達到理論該有的速度。
+      * `理論 UPH = Theoretical Max UPD / 24`
+      * `實際 UPH = 總測試量 (TestQty) / 實際運作總時數`
+      * `計算 = 實際 UPH / 理論 UPH`
+    * **Q (良率 / Quality):** 測試品質。
+      * `計算 = 總良品數 (PassQty) / 總測試數 (TestQty)`
+    * **整體 OEE (Overall OEE):**
+      * `計算 = 實際平均 Gross UPD / Theoretical Max UPD`。 (等同於 A × P 綜合表現)
+
+    #### 3. 產能規劃指標 (Capacity Planning)
+    * **Planned Target UPD (規劃基準):** 生管或工程師預設的安全排程水準（例如：2,800 ea/day）。
+    * **隱含 OEE (Implied OEE):** 該規劃基準佔理論 100% 產能的比例。`計算 = Planned Target UPD / Theoretical Max UPD`。這反映了排程預設保留了多少百分比作為換料、維修、重測的緩衝。
+    """)
+
 st.markdown("### 🔍 Data Filters")
 filter_col1, filter_col2 = st.columns([1, 2])
 
@@ -121,76 +145,46 @@ filtered_df = raw_df[
     (raw_df['TestQty'] >= min_lot_size)
 ].copy()
 
-@st.cache_data
-def split_cross_day_lots(df, cutoff_time):
-    df = df.loc[:, ~df.columns.duplicated()]
-    df = df.dropna(subset=['CheckInTime', 'CheckOutTime', 'TestQty', 'PassQty']).copy()
-    
-    cutoff_hour = cutoff_time.hour
-    cutoff_minute = cutoff_time.minute
-    new_rows = []
-    
-    for _, row in df.iterrows():
-        in_time, out_time = row['CheckInTime'], row['CheckOutTime']
-        test_qty, pass_qty = row['TestQty'], row['PassQty']
-        
-        shift_in_time = in_time - pd.Timedelta(hours=cutoff_hour, minutes=cutoff_minute)
-        shift_out_time = out_time - pd.Timedelta(hours=cutoff_hour, minutes=cutoff_minute)
-        
-        start_date, end_date = shift_in_time.date(), shift_out_time.date()
-        total_seconds = (out_time - in_time).total_seconds()
-        
-        row_dict = row.to_dict()
-        
-        if start_date == end_date or total_seconds <= 0:
-            row_dict['ProductionDate'] = start_date
-            row_dict['ApportionedTestQty'] = test_qty
-            row_dict['ApportionedPassQty'] = pass_qty
-            new_rows.append(row_dict)
-        else:
-            boundary_time = pd.Timestamp(datetime.combine(end_date, cutoff_time))
-            if boundary_time < in_time: boundary_time += pd.Timedelta(days=1)
-                
-            ratio_day1 = (boundary_time - in_time).total_seconds() / total_seconds
-            ratio_day2 = (out_time - boundary_time).total_seconds() / total_seconds
-            
-            row1, row2 = row_dict.copy(), row_dict.copy()
-            row1['ProductionDate'] = start_date
-            row1['ApportionedTestQty'] = test_qty * ratio_day1
-            row1['ApportionedPassQty'] = pass_qty * ratio_day1
-            new_rows.append(row1)
-            
-            row2['ProductionDate'] = end_date
-            row2['ApportionedTestQty'] = test_qty * ratio_day2
-            row2['ApportionedPassQty'] = pass_qty * ratio_day2
-            new_rows.append(row2)
-            
-    return pd.DataFrame(new_rows)
-
-cutoff_time_obj = time(cutoff_hour, 0)
-df_split = split_cross_day_lots(filtered_df, cutoff_time_obj)
-
-if df_split.empty:
+if filtered_df.empty:
     st.warning("No production data available for the selected filters.")
     st.stop()
 
-df_split['ProductionDate'] = pd.to_datetime(df_split['ProductionDate'])
+filtered_df['Duration_Hr'] = (filtered_df['CheckOutTime'] - filtered_df['CheckInTime']).dt.total_seconds() / 3600.0
+
+tester_summary = filtered_df.groupby('Tester').agg(
+    Lot_Count=('LotNo', 'nunique'),
+    Total_TestQty=('TestQty', 'sum'),
+    Total_PassQty=('PassQty', 'sum'),
+    Total_Duration_Hr=('Duration_Hr', 'sum'),
+    Min_CheckIn=('CheckInTime', 'min'),
+    Max_CheckOut=('CheckOutTime', 'max')
+).reset_index()
+
+tester_summary['Active_Days'] = tester_summary['Total_Duration_Hr'] / 24.0
+tester_summary['Avg_Gross_UPD'] = np.where(tester_summary['Active_Days'] > 0, tester_summary['Total_TestQty'] / tester_summary['Active_Days'], 0)
+tester_summary['Avg_Net_UPD'] = np.where(tester_summary['Active_Days'] > 0, tester_summary['Total_PassQty'] / tester_summary['Active_Days'], 0)
+
+tester_summary['Calendar_Span_Days'] = (tester_summary['Max_CheckOut'] - tester_summary['Min_CheckIn']).dt.total_seconds() / (24.0 * 3600.0)
+tester_summary['Availability (A)'] = np.where(tester_summary['Calendar_Span_Days'] > 0, tester_summary['Active_Days'] / tester_summary['Calendar_Span_Days'], 0)
+
+theo_uph = theo_max_upd / 24.0
+tester_summary['Actual_UPH'] = np.where(tester_summary['Total_Duration_Hr'] > 0, tester_summary['Total_TestQty'] / tester_summary['Total_Duration_Hr'], 0)
+tester_summary['Performance (P)'] = tester_summary['Actual_UPH'] / theo_uph
+
+tester_summary['Yield (Q)'] = np.where(tester_summary['Total_TestQty'] > 0, tester_summary['Total_PassQty'] / tester_summary['Total_TestQty'], 0)
+tester_summary['Avg_OEE'] = tester_summary['Avg_Gross_UPD'] / theo_max_upd
+tester_summary = tester_summary.sort_values(by='Tester', ascending=True)
 
 # ==============================================================================
 # --- 4. Dashboard UI ---
 # ==============================================================================
 
-# ---------------------------------------------------------
-# Part A: Overall Performance
-# ---------------------------------------------------------
 st.markdown("### 📊 Overall Performance")
-
-unique_lots = filtered_df.drop_duplicates(subset=['LotNo'])
-total_test = int(unique_lots['TestQty'].sum())
-total_pass = int(unique_lots['PassQty'].sum())
+total_test = int(tester_summary['Total_TestQty'].sum())
+total_pass = int(tester_summary['Total_PassQty'].sum())
 overall_yield = (total_pass / total_test) * 100 if total_test > 0 else 0
-active_testers = df_split['Tester'].nunique()
-valid_lots_count = len(unique_lots)
+active_testers = tester_summary['Tester'].nunique()
+valid_lots_count = int(tester_summary['Lot_Count'].sum())
 
 c1, c2, c3, c4 = st.columns(4)
 with c1: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Total TestQty (Gross)</div><div class='kpi-value'>{total_test:,}</div></div>", unsafe_allow_html=True)
@@ -200,54 +194,23 @@ with c4: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Active Teste
 
 st.divider()
 
-# ---------------------------------------------------------
-# Part B: Key Analysis Summary
-# ---------------------------------------------------------
 st.markdown("## ATE Tester Capacity Analysis & Validation")
-
-daily_stats = df_split.groupby(['Tester', 'ProductionDate']).agg(
-    Daily_Gross_UPD=('ApportionedTestQty', 'sum'),
-    Daily_Net_UPD=('ApportionedPassQty', 'sum')
-).reset_index()
-
-tester_summary = daily_stats.groupby('Tester').agg(
-    Avg_Gross_UPD=('Daily_Gross_UPD', 'mean'),
-    Avg_Net_UPD=('Daily_Net_UPD', 'mean')
-).reset_index()
-
-tester_summary['Avg_OEE'] = tester_summary['Avg_Gross_UPD'] / theo_max_upd
-
-lot_counts = filtered_df.groupby('Tester')['LotNo'].nunique().reset_index().rename(columns={'LotNo': 'Lots'})
-tester_summary = tester_summary.merge(lot_counts, on='Tester', how='left')
-tester_summary = tester_summary.sort_values(by='Tester', ascending=True)
-
 avg_gross_upd = tester_summary['Avg_Gross_UPD'].mean()
 avg_net_upd = tester_summary['Avg_Net_UPD'].mean()
 avg_oee = tester_summary['Avg_OEE'].mean() * 100
-max_upd, min_upd = tester_summary['Avg_Gross_UPD'].max(), tester_summary['Avg_Gross_UPD'].min()
 
 st.markdown("#### 1. Period Performance Summary")
-st.caption(f"共計 {valid_lots_count} 個有效批次 (排除 < {min_lot_size} ea)。")
+st.caption(f"共計 {valid_lots_count} 個有效批次 (排除 < {min_lot_size} ea)。 此數據採用「有效運作時數」精密折算。")
 
 sc1, sc2, sc3 = st.columns(3)
 with sc1: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Actual UPD (TestQty)</div><div class='summary-value'>{avg_gross_upd:,.0f}</div></div>", unsafe_allow_html=True)
 with sc2: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Effective UPD (PassQty)</div><div class='summary-value'>{avg_net_upd:,.0f}</div></div>", unsafe_allow_html=True)
 with sc3: st.markdown(f"<div class='summary-card'><div class='summary-title'>Overall OEE</div><div class='summary-value'>{avg_oee:.1f}%</div></div>", unsafe_allow_html=True)
 
-# ---------------------------------------------------------
-# Part C: Capacity Planning Insights (🌟 NEW)
-# ---------------------------------------------------------
 st.markdown("#### 2. Capacity Planning Insights (結論與規劃建議)")
-
-# 計算統計與規劃指標
 buffer_pct = ((avg_gross_upd - planned_upd) / avg_gross_upd) * 100 if avg_gross_upd > 0 else 0
 implied_oee = (planned_upd / theo_max_upd) * 100 if theo_max_upd > 0 else 0
 
-# 計算規劃值在歷史每日資料中的百分位數 (PR值)
-all_daily_upds = daily_stats['Daily_Gross_UPD']
-percentile_rank = (all_daily_upds < planned_upd).mean() * 100 if len(all_daily_upds) > 0 else 0
-
-# 動態產出結論文字
 if avg_gross_upd >= planned_upd:
     insight_text = f"""
     驗證結果顯示，目前的 ATE Tester 實際產能平均約為 <span class='insight-highlight'>{avg_gross_upd:,.0f} ea/day</span>，高於您預估的規劃基準 <span class='insight-highlight'>{planned_upd:,.0f}</span>。<br>
@@ -261,35 +224,35 @@ else:
 
 st.markdown(f"<div class='insight-box'>{insight_text}</div>", unsafe_allow_html=True)
 
-# 產出規劃比較表
 insight_data = {
-    "指標 (Metric)": ["報表平均 UPD", "您預估的 UPD", "理論最大 UPD", f"隱含 OEE (於 {planned_upd})"],
+    "指標 (Metric)": ["報表平均 UPD (TestQty)", "您規劃的預估 UPD", "理論最大 UPD", f"隱含 OEE (於 {planned_upd})"],
     "數值 (Value)": [f"{avg_gross_upd:,.0f}", f"{planned_upd:,.0f}", f"{theo_max_upd:,.0f}", f"{implied_oee:.1f}%"],
     "備註 (Note)": [
-        "實際產出表現",
-        f"約為實際數據的 PR{percentile_rank:.0f} 分位數 (保守估計)",
-        "100% OEE, 無重測/無異常",
-        "排程預設包含換料、異常、重測之折損"
+        "實際產出吞吐量表現",
+        "目前設定的排程安全水準",
+        "100% OEE, 無停機/無異常",
+        "排程預設包含換料、異常之折損空間"
     ]
 }
-insight_df = pd.DataFrame(insight_data)
-st.dataframe(insight_df, use_container_width=True, hide_index=True)
+st.dataframe(pd.DataFrame(insight_data), use_container_width=True, hide_index=True)
 
+st.markdown("#### 3. Tester Performance Details (各機台表現明細與 A/P/Q 拆解)")
+display_df = tester_summary[[
+    'Tester', 'Lot_Count', 'Active_Days', 
+    'Availability (A)', 'Performance (P)', 'Yield (Q)', 
+    'Avg_Gross_UPD', 'Avg_Net_UPD', 'Avg_OEE'
+]].copy()
 
-# ---------------------------------------------------------
-# Part D: Tester Summary Table
-# ---------------------------------------------------------
-st.markdown("#### 3. Tester Performance Details (各機台表現明細)")
-
-display_df = tester_summary[['Tester', 'Lots', 'Avg_Gross_UPD', 'Avg_Net_UPD', 'Avg_OEE']].copy()
 display_df = display_df.rename(columns={
-    'Tester': 'Tester',
-    'Lots': 'Lot Count',
-    'Avg_Gross_UPD': 'Avg UPD (TestQty)',
-    'Avg_Net_UPD': 'Avg UPD (PassQty)',
-    'Avg_OEE': 'Avg OEE'
+    'Tester': 'Tester', 'Lot_Count': 'Lot Count', 'Active_Days': 'Active Days (運轉天數)',
+    'Availability (A)': 'Availability (稼動率)', 'Performance (P)': 'Performance (效率)', 'Yield (Q)': 'Yield (良率)',
+    'Avg_Gross_UPD': 'Avg UPD (TestQty)', 'Avg_Net_UPD': 'Avg UPD (PassQty)', 'Avg_OEE': 'Avg OEE'
 })
 
+display_df['Active Days (運轉天數)'] = display_df['Active Days (運轉天數)'].apply(lambda x: f"{x:.1f}")
+display_df['Availability (稼動率)'] = display_df['Availability (稼動率)'].apply(lambda x: f"{x*100:.1f}%")
+display_df['Performance (效率)'] = display_df['Performance (效率)'].apply(lambda x: f"{x*100:.1f}%")
+display_df['Yield (良率)'] = display_df['Yield (良率)'].apply(lambda x: f"{x*100:.1f}%")
 display_df['Avg UPD (TestQty)'] = display_df['Avg UPD (TestQty)'].apply(lambda x: f"{x:,.0f}")
 display_df['Avg UPD (PassQty)'] = display_df['Avg UPD (PassQty)'].apply(lambda x: f"{x:,.0f}")
 display_df['Avg OEE'] = display_df['Avg OEE'].apply(lambda x: f"{x*100:.1f}%")
