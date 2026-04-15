@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, time
 
 st.set_page_config(page_title="ATE Tester Capacity Analysis", layout="wide")
 
-# --- Custom CSS (Added new styles for Sub-KPI cards) ---
+# --- Custom CSS (Preserving KPI Cards and Green Highlight) ---
 st.markdown("""
     <style>
     /* Top KPI Card Style */
@@ -33,7 +33,7 @@ st.markdown("""
     }
     .summary-title { color: #6c757d; font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;}
     .summary-value { color: #28a745; font-size: 26px; font-weight: bold; margin-top: 5px; }
-    .summary-value-small { color: #28a745; font-size: 20px; font-weight: bold; margin-top: 10px; } /* For Range text */
+    .summary-value-small { color: #28a745; font-size: 20px; font-weight: bold; margin-top: 10px; } 
     </style>
 """, unsafe_allow_html=True)
 
@@ -85,7 +85,7 @@ def load_data(file):
     return generate_mock_data()
 
 # ==============================================================================
-# --- 1. Sidebar Settings ---
+# --- 1. Sidebar Settings (Added Standard Parameters) ---
 # ==============================================================================
 st.sidebar.header("📁 1. Data Input")
 uploaded_file = st.sidebar.file_uploader("Upload Yield Report (Excel)", type=["xlsx", "xls"])
@@ -96,8 +96,28 @@ if raw_df is None or raw_df.empty:
     st.stop()
 
 st.sidebar.divider()
-st.sidebar.header("⚙️ 2. Calculation Settings")
+st.sidebar.header("⚙️ 2. Cutoff Settings")
 cutoff_hour = st.sidebar.slider("Daily Cutoff Time (Hour)", min_value=0, max_value=23, value=0, help="0 = 24:00 (Midnight).")
+
+# 🌟 NEW: ATE Smart Capacity Standard Parameters for OEE Calculation
+st.sidebar.divider()
+st.sidebar.header("📐 3. Standard Params (For OEE)")
+st.sidebar.caption("Define the theoretical standards for the selected program.")
+std_lot_size = st.sidebar.number_input("Lot Size", value=6600, step=100)
+std_site = st.sidebar.number_input("Site", value=8, step=1)
+std_tt = st.sidebar.number_input("Test Time (s)", value=150.0, step=1.0)
+std_fpy = st.sidebar.number_input("Expected FPY %", value=95.0, step=1.0)
+std_op_time = st.sidebar.number_input("OP Time (mins)", value=15.0, step=1.0)
+
+# Calculate Theoretical Max UPD based on Smart Capacity Logic (at 100% OEE)
+try:
+    td = std_lot_size / std_site
+    r0 = td * (std_tt / 60)
+    r1 = ((std_lot_size * (1 - (std_fpy / 100))) / std_site) * (std_tt / 60) + std_op_time
+    sum_ct = r0 + r1
+    theo_max_upd = (1440 / sum_ct) * std_lot_size
+except ZeroDivisionError:
+    theo_max_upd = 1  # Fallback to prevent crash if Site or Sum_CT is 0
 
 # ==============================================================================
 # --- 2. Main Area: Help Section & Filters ---
@@ -105,27 +125,30 @@ cutoff_hour = st.sidebar.slider("Daily Cutoff Time (Hour)", min_value=0, max_val
 with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
     st.markdown("""
     ### 📖 Calculation Logic
-    To ensure precision in daily capacity and equipment efficiency, this system employs a **"Cross-Day Apportionment"** algorithm to prevent data distortion caused by lots crossing the daily cutoff time.
+    To ensure precision and eliminate data distortions from overlapping timestamps, OEE is calculated by comparing actual output against the theoretical maximum output derived from your Standard Parameters.
 
     #### Phase 1: Cross-Day Apportionment
-    For any lot that crosses the designated Daily Cutoff Time, the system splits its output and duration proportionally:
+    For lots crossing the Daily Cutoff Time, output is split proportionally:
     * **Time Ratio (R):** `Seconds tested on Current Day / Total Test Seconds`
     * **Apportioned Qty:** `TestQty * R`
-    * **Apportioned Duration (Hours):** `Total Duration (Hours) * R`
 
-    #### Phase 2: Tester Summary Metrics
-    After the foundational apportionment, metrics are aggregated per ATE:
+    #### Phase 2: Theoretical Max Capacity (Standard Logic)
+    * **TD (Touch Downs):** `Lot Size / Site`
+    * **Cycle Time (R0):** `TD * (Test Time / 60)`
+    * **RT Cycle Time (R1):** `((Lot Size * (1 - FPY%)) / Site * (Test Time / 60)) + OP Time`
+    * **Theoretical Max UPD:** `(1440 mins / (R0 + R1)) * Lot Size` *(Represents 100% capability)*
+
+    #### Phase 3: Tester Summary Metrics
     * **Daily UPD:** `SUM(Apportioned Qty)` for a specific day.
     * **Avg UPD:** `SUM(Daily UPD) / Days with production activity`.
     * **Real UPW:** Aggregates production into actual calendar weeks, then calculates the `AVERAGE(Weekly Output)`.
-    * **Daily OEE:** `SUM(Apportioned Duration) / 24` *(Using 24 hours as full load base)*.
-    * **Avg OEE:** `(SUM(Daily OEE) / Days with production activity) * 100%`.
-    * **Lot Count:** Number of unique lots processed by the tester during the selected period.
+    * **Avg OEE:** `(Avg Actual UPD / Theoretical Max UPD) * 100%`.
     """)
 
 st.markdown("### 🔍 Data Filters")
 
-filter_col1, filter_col2 = st.columns(2)
+# 🌟 FIX 1: Adjust Column Ratio to [1, 2] to give ProgramName more width
+filter_col1, filter_col2 = st.columns([1, 2])
 
 with filter_col1:
     op_options = sorted(raw_df['OpNo'].dropna().unique().tolist())
@@ -165,14 +188,12 @@ def split_cross_day_lots(df, cutoff_time):
         
         start_date, end_date = shift_in_time.date(), shift_out_time.date()
         total_seconds = (out_time - in_time).total_seconds()
-        total_duration_hr = total_seconds / 3600
         
         row_dict = row.to_dict()
         
         if start_date == end_date or total_seconds <= 0:
             row_dict['ProductionDate'] = start_date
             row_dict['ApportionedQty'] = qty
-            row_dict['ApportionedDuration_Hr'] = total_duration_hr
             new_rows.append(row_dict)
         else:
             boundary_time = pd.Timestamp(datetime.combine(end_date, cutoff_time))
@@ -183,11 +204,9 @@ def split_cross_day_lots(df, cutoff_time):
             
             row1, row2 = row_dict.copy(), row_dict.copy()
             row1['ProductionDate'], row1['ApportionedQty'] = start_date, qty * ratio_day1
-            row1['ApportionedDuration_Hr'] = total_duration_hr * ratio_day1
             new_rows.append(row1)
             
             row2['ProductionDate'], row2['ApportionedQty'] = end_date, qty * ratio_day2
-            row2['ApportionedDuration_Hr'] = total_duration_hr * ratio_day2
             new_rows.append(row2)
             
     return pd.DataFrame(new_rows)
@@ -233,16 +252,15 @@ st.markdown("## ATE Tester Capacity Analysis & Validation")
 
 # Calculate Daily metrics
 daily_stats = df_split.groupby(['Tester', 'ProductionDate']).agg(
-    Daily_UPD=('ApportionedQty', 'sum'),
-    Daily_Duration=('ApportionedDuration_Hr', 'sum')
+    Daily_UPD=('ApportionedQty', 'sum')
 ).reset_index()
-
-daily_stats['Daily_OEE'] = (daily_stats['Daily_Duration'] / 24.0)
 
 tester_summary = daily_stats.groupby('Tester').agg(
-    Avg_UPD=('Daily_UPD', 'mean'),
-    Avg_OEE=('Daily_OEE', 'mean')
+    Avg_UPD=('Daily_UPD', 'mean')
 ).reset_index()
+
+# 🌟 FIX 2: OEE Calculation Integration (Actual UPD / Theoretical Max UPD)
+tester_summary['Avg_OEE'] = tester_summary['Avg_UPD'] / theo_max_upd
 
 # Real UPW Calculation
 weekly_stats = df_split.groupby(['Tester', pd.Grouper(key='ProductionDate', freq='W')]).agg(
@@ -269,8 +287,8 @@ avg_actual_oee = tester_summary['Avg_OEE'].mean() * 100
 max_upd, min_upd = tester_summary['Avg_UPD'].max(), tester_summary['Avg_UPD'].min()
 
 st.markdown("#### 1. Key Analysis Summary")
+st.caption(f"🎯 Theoretical Target UPD: **{theo_max_upd:,.0f} units/day** (Based on left standard parameters)")
 
-# 🌟 NEW: Summary Sub-KPI Cards Design
 sc1, sc2, sc3, sc4 = st.columns(4)
 
 with sc1:
@@ -280,7 +298,6 @@ with sc2:
 with sc3:
     st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg OEE</div><div class='summary-value'>{avg_actual_oee:.1f}%</div></div>", unsafe_allow_html=True)
 with sc4:
-    # Use smaller font for range so it fits nicely
     st.markdown(f"<div class='summary-card'><div class='summary-title'>UPD Range</div><div class='summary-value-small'>{min_upd:,.0f} ~ {max_upd:,.0f}</div></div>", unsafe_allow_html=True)
 
 
