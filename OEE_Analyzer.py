@@ -4,7 +4,6 @@ import numpy as np
 import plotly.express as px
 from datetime import datetime, timedelta, time
 
-# 🌟 更新系統名稱
 st.set_page_config(page_title="ATE Capacity & OEE Analyzer", layout="wide")
 
 # --- Custom CSS ---
@@ -35,7 +34,6 @@ st.markdown("""
         fill: #0056b3 !important;
     }
     
-    /* 🌟 V25 新增：Tab 標籤頁視覺強化 */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
         border-bottom: 2px solid #e0e0e0;
@@ -77,12 +75,15 @@ def generate_mock_data():
     testers = [f"HP93K-EXA{i:02d}" for i in range(2, 10)]
     ops = ["FT1", "FTA", "MT1"]
     programs_map = {"FT1": ["PROD_GS631_FT1_REV1"], "FTA": ["PROD_GS631_FTA_REV1"], "MT1": ["PROD_GS631_MT1_REV1"]}
-    tester_clocks = {tester: now - timedelta(days=20) for tester in testers}
+    products = ["SS16G", "MU16G", "HY12G", "SS12G"] # 🌟 新增模擬產品料號
     
-    for i in range(150):
+    tester_clocks = {tester: now - timedelta(days=30) for tester in testers}
+    
+    for i in range(250):
         tester = np.random.choice(testers)
         op = np.random.choice(ops)
         prog = np.random.choice(programs_map[op])
+        prod = np.random.choice(products)
         
         wait_time = timedelta(hours=np.random.uniform(0.5, 3))
         start_time = tester_clocks[tester] + wait_time
@@ -96,10 +97,10 @@ def generate_mock_data():
         yield_rate = np.random.uniform(0.95, 0.99)
         pass_qty = int(qty * yield_rate)
         
-        data.append([f"LOT_{i:04d}", op, prog, tester, start_time, end_time, qty, pass_qty])
+        data.append([f"LOT_{i:04d}", prod, op, prog, tester, start_time, end_time, qty, pass_qty])
         tester_clocks[tester] = end_time
         
-    return pd.DataFrame(data, columns=['LotNo', 'OpNo', 'ProgramName', 'Tester', 'CheckInTime', 'CheckOutTime', 'TestQty', 'PassQty'])
+    return pd.DataFrame(data, columns=['LotNo', 'ProductNo', 'OpNo', 'ProgramName', 'Tester', 'CheckInTime', 'CheckOutTime', 'TestQty', 'PassQty'])
 
 def load_data(file):
     if file is not None:
@@ -110,6 +111,9 @@ def load_data(file):
             df['CheckOutTime'] = pd.to_datetime(df['CheckOutTime'], errors='coerce')
             df['TestQty'] = pd.to_numeric(df['TestQty'], errors='coerce').fillna(0)
             df['PassQty'] = pd.to_numeric(df['PassQty'], errors='coerce').fillna(0)
+            # 確保 ProductNo 存在，若無則補空值
+            if 'ProductNo' not in df.columns:
+                df['ProductNo'] = "Unknown_Product"
             return df
         except Exception as e:
             st.error(f"Failed to load file. Error: {str(e)}")
@@ -122,6 +126,10 @@ raw_df = load_data(uploaded_file)
 if raw_df is None or raw_df.empty:
     st.warning("No data available.")
     st.stop()
+
+# 獲取資料日期極值
+min_date = raw_df['CheckInTime'].min().date() if pd.notnull(raw_df['CheckInTime'].min()) else datetime.now().date()
+max_date = raw_df['CheckOutTime'].max().date() if pd.notnull(raw_df['CheckOutTime'].max()) else datetime.now().date()
 
 # ==============================================================================
 # --- 1. Main Area: Filters & Help Section ---
@@ -156,7 +164,17 @@ with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
     """)
 
 st.markdown("### 🔍 Data Filters")
-filter_col1, filter_col2 = st.columns([1, 2])
+
+# 🌟 新增：時間區間過濾器 (放在最上方，跨越所有欄位)
+date_range = st.date_input("Select Date Range (CheckIn/Out Overlap)", value=(min_date, max_date), min_value=min_date, max_value=max_date)
+
+# 處理日期選擇邏輯 (確保始終有 start_date 和 end_date)
+if isinstance(date_range, tuple) and len(date_range) == 2:
+    start_date, end_date = date_range
+else:
+    start_date = end_date = date_range[0] if isinstance(date_range, (list, tuple)) else date_range
+
+filter_col1, filter_col2, filter_col3 = st.columns([1, 1, 1])
 
 with filter_col1:
     op_options = sorted(raw_df['OpNo'].dropna().unique().tolist())
@@ -164,28 +182,29 @@ with filter_col1:
 
 filtered_by_op = raw_df[raw_df['OpNo'].isin(selected_ops)] if selected_ops else raw_df
 prog_options = sorted(filtered_by_op['ProgramName'].dropna().unique().tolist())
+prod_options = sorted(filtered_by_op['ProductNo'].dropna().unique().tolist()) # 🌟 取得 ProductNo 選項
 
-if 'saved_progs' not in st.session_state:
-    st.session_state.saved_progs = []
-
-def update_progs():
-    st.session_state.saved_progs = st.session_state.prog_select_widget
-
-valid_defaults = [p for p in st.session_state.saved_progs if p in prog_options]
+# Session State 管理 ProgramName
+if 'saved_progs' not in st.session_state: st.session_state.saved_progs = []
+def update_progs(): st.session_state.saved_progs = st.session_state.prog_select_widget
+valid_defaults_prog = [p for p in st.session_state.saved_progs if p in prog_options]
 
 with filter_col2:
-    selected_progs = st.multiselect(
-        "Select Program (ProgramName)", 
-        options=prog_options, 
-        default=valid_defaults,
-        key="prog_select_widget",
-        on_change=update_progs
-    )
+    selected_progs = st.multiselect("Select Program", options=prog_options, default=valid_defaults_prog, key="prog_select_widget", on_change=update_progs)
+
+# Session State 管理 ProductNo
+if 'saved_prods' not in st.session_state: st.session_state.saved_prods = []
+def update_prods(): st.session_state.saved_prods = st.session_state.prod_select_widget
+valid_defaults_prod = [p for p in st.session_state.saved_prods if p in prod_options]
+
+with filter_col3:
+    # 🌟 新增：ProductNo 篩選器
+    selected_prods = st.multiselect("Select Product (ProductNo)", options=prod_options, default=valid_defaults_prod, key="prod_select_widget", on_change=update_prods)
 
 st.divider()
 
 # ==============================================================================
-# --- 2. Sidebar Settings (Dynamic Targets per OpNo) ---
+# --- 2. Sidebar Settings ---
 # ==============================================================================
 st.sidebar.header("⚙️ Data Cleaning Rules")
 min_lot_size = st.sidebar.number_input("Exclude Lots smaller than (Qty)", value=0, step=100)
@@ -203,21 +222,27 @@ if selected_ops:
         targets[op] = {'theo': theo, 'plan': plan}
         st.sidebar.write("") 
 
-if not selected_ops or not selected_progs:
-    st.info("👆 Please select **OpNo** and **ProgramName** above to generate the report.")
+if not selected_ops or not selected_progs or not selected_prods:
+    st.info("👆 Please select **OpNo, ProgramName, and ProductNo** above to generate the report.")
     st.stop()
 
 # ==============================================================================
 # --- 3. Data Processing Engine ---
 # ==============================================================================
-filtered_df = raw_df[
-    (raw_df['OpNo'].isin(selected_ops)) & 
-    (raw_df['ProgramName'].isin(selected_progs)) &
-    (raw_df['TestQty'] >= min_lot_size)
-].copy()
+# 🌟 核心升級：將 Date Range 與 ProductNo 加入過濾條件
+mask = (
+    raw_df['OpNo'].isin(selected_ops) & 
+    raw_df['ProgramName'].isin(selected_progs) &
+    raw_df['ProductNo'].isin(selected_prods) &
+    (raw_df['TestQty'] >= min_lot_size) &
+    (raw_df['CheckInTime'].dt.date <= end_date) & 
+    (raw_df['CheckOutTime'].dt.date >= start_date)
+)
+
+filtered_df = raw_df[mask].copy()
 
 if filtered_df.empty:
-    st.warning("No production data available for the selected filters.")
+    st.warning("No production data available for the selected filters and date range.")
     st.stop()
 
 filtered_df['Duration_Hr'] = (filtered_df['CheckOutTime'] - filtered_df['CheckInTime']).dt.total_seconds() / 3600.0
@@ -252,7 +277,6 @@ tester_summary = tester_summary.sort_values(by=['OpNo', 'Tester'], ascending=Tru
 # ==============================================================================
 # --- 4. Dashboard UI ---
 # ==============================================================================
-# 🌟 更新首頁大標題
 st.markdown("## 📊 ATE Capacity & OEE Analyzer")
 st.markdown("<p style='color: #444; font-size: 14px;'>Select an Operation tab below to view its isolated performance and capacity planning insights.</p>", unsafe_allow_html=True)
 
@@ -260,7 +284,7 @@ tabs = st.tabs(selected_ops)
 
 for idx, op in enumerate(selected_ops):
     with tabs[idx]:
-        st.write("") # Spacer for better breathing room inside the tab
+        st.write("") 
         
         op_df = filtered_df[filtered_df['OpNo'] == op]
         op_summary = tester_summary[tester_summary['OpNo'] == op]
@@ -280,14 +304,10 @@ for idx, op in enumerate(selected_ops):
         active_testers = op_summary['Tester'].nunique()
 
         c1, c2, c3, c4 = st.columns(4)
-        with c1: 
-            st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Total Insertions (Gross)</div><div class='kpi-value'>{total_insertions:,}</div></div>", unsafe_allow_html=True)
-        with c2: 
-            st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Pass Insertions (Net)</div><div class='kpi-value'>{total_pass_insertions:,}</div></div>", unsafe_allow_html=True)
-        with c3: 
-            st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Avg Step Yield</div><div class='kpi-value'>{avg_step_yield:.2f}%</div></div>", unsafe_allow_html=True)
-        with c4: 
-            st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Active Testers</div><div class='kpi-value'>{active_testers}</div></div>", unsafe_allow_html=True)
+        with c1: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Total Insertions (Gross)</div><div class='kpi-value'>{total_insertions:,}</div></div>", unsafe_allow_html=True)
+        with c2: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Pass Insertions (Net)</div><div class='kpi-value'>{total_pass_insertions:,}</div></div>", unsafe_allow_html=True)
+        with c3: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Avg Step Yield</div><div class='kpi-value'>{avg_step_yield:.2f}%</div></div>", unsafe_allow_html=True)
+        with c4: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Active Testers</div><div class='kpi-value'>{active_testers}</div></div>", unsafe_allow_html=True)
 
         st.divider()
 
@@ -343,7 +363,7 @@ for idx, op in enumerate(selected_ops):
         st.write("")
 
         # ---------------------------------------------------------
-        # Part D: Tester Performance Details (Table with Highlight)
+        # Part D: Tester Performance Details
         # ---------------------------------------------------------
         st.markdown("#### 3. Tester Performance Details (A/P/Q Breakdown)")
         
@@ -372,8 +392,7 @@ for idx, op in enumerate(selected_ops):
                 num_val = float(val.strip('%'))
                 if num_val < threshold:
                     return 'background-color: #ffebee; color: #dc3545; font-weight: bold;'
-            except:
-                pass
+            except: pass
             return ''
         
         styled_df = display_df.style.map(lambda x: highlight_low_oee(x, implied_oee), subset=['Avg OEE'])
@@ -382,28 +401,32 @@ for idx, op in enumerate(selected_ops):
         st.write("")
 
         # ---------------------------------------------------------
-        # Part E: Chart
+        # Part E: Visualizations (Throughput + Product Mix)
         # ---------------------------------------------------------
-        st.markdown("#### 4. Tester Throughput Comparison")
+        st.markdown("#### 4. Visualizations")
         
-        fig = px.bar(
-            op_summary, 
-            x='Tester', 
-            y=['Avg_Gross_UPD', 'Avg_Net_UPD'],
-            barmode='group',
-            labels={'value': 'Prorated Rate (UPD)', 'variable': 'Metrics', 'Tester': ''},
-            color_discrete_map={'Avg_Gross_UPD': '#1E3A8A', 'Avg_Net_UPD': '#28a745'}
-        )
+        col_chart1, col_chart2 = st.columns(2)
         
-        fig.add_hline(y=op_plan_val, line_dash="dash", line_color="orange", 
-                      annotation_text="Planned Target", annotation_position="top right")
-        fig.add_hline(y=op_theo_val, line_dash="dot", line_color="red", 
-                      annotation_text="Theoretical Max", annotation_position="top right")
-        
-        fig.update_layout(
-            legend_title_text='',
-            margin=dict(t=20, b=0, l=0, r=0),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
+        with col_chart1:
+            fig1 = px.bar(
+                op_summary, x='Tester', y=['Avg_Gross_UPD', 'Avg_Net_UPD'], barmode='group',
+                title=f"Throughput Comparison ({op})",
+                labels={'value': 'Prorated Rate (UPD)', 'variable': 'Metrics', 'Tester': ''},
+                color_discrete_map={'Avg_Gross_UPD': '#1E3A8A', 'Avg_Net_UPD': '#28a745'}
+            )
+            fig1.add_hline(y=op_plan_val, line_dash="dash", line_color="orange", annotation_text="Planned Target", annotation_position="top right")
+            fig1.add_hline(y=op_theo_val, line_dash="dot", line_color="red", annotation_text="Theoretical Max", annotation_position="top right")
+            fig1.update_layout(legend_title_text='', margin=dict(t=40, b=0, l=0, r=0), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+            st.plotly_chart(fig1, use_container_width=True)
+            
+        with col_chart2:
+            # 🌟 新增：Product Mix 堆疊圖
+            prod_summary = op_df.groupby(['Tester', 'ProductNo'])['TestQty'].sum().reset_index()
+            fig2 = px.bar(
+                prod_summary, x='Tester', y='TestQty', color='ProductNo',
+                title=f"Product Mix Volume ({op})",
+                labels={'TestQty': 'Total Insertions (Gross)', 'Tester': '', 'ProductNo': 'Product'},
+                color_discrete_sequence=px.colors.qualitative.Pastel
+            )
+            fig2.update_layout(margin=dict(t=40, b=0, l=0, r=0), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+            st.plotly_chart(fig2, use_container_width=True)
