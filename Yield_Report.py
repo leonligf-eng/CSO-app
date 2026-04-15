@@ -81,7 +81,7 @@ if raw_df is None or raw_df.empty:
     st.stop()
 
 # ==============================================================================
-# --- 1. Main Area: Filters & (UNABRIDGED) Help Section ---
+# --- 1. Main Area: Filters & Help Section ---
 # ==============================================================================
 with st.expander("ℹ️ Help: Formula & Parameter Definitions (公式與參數定義)"):
     st.markdown("""
@@ -122,8 +122,18 @@ with filter_col1:
 filtered_by_op = raw_df[raw_df['OpNo'].isin(selected_ops)] if selected_ops else raw_df
 prog_options = sorted(filtered_by_op['ProgramName'].dropna().unique().tolist())
 
+# 🌟 核心修正 1：加入 Session State 記憶功能，確保更換 OpNo 時，已選的 Program 不會被清空
+if 'saved_progs' not in st.session_state:
+    st.session_state.saved_progs = []
+
+# 過濾出在當前 prog_options 裡仍然有效的已選項，作為預設值
+valid_defaults = [p for p in st.session_state.saved_progs if p in prog_options]
+
 with filter_col2:
-    selected_progs = st.multiselect("Select Program (ProgramName)", options=prog_options)
+    selected_progs = st.multiselect("Select Program (ProgramName)", options=prog_options, default=valid_defaults)
+
+# 即時將當前的選擇存回 Session State
+st.session_state.saved_progs = selected_progs
 
 if not selected_ops or not selected_progs:
     st.info("👆 Please select **OpNo** and **ProgramName** above to generate the report.")
@@ -144,8 +154,8 @@ st.sidebar.caption("Define specific baselines for EACH selected operation.")
 targets = {}
 for op in selected_ops:
     st.sidebar.markdown(f"**🔹 Operation: {op}**")
-    theo = st.sidebar.number_input(f"Theo Max UPD (100% OEE)({op})", value=4240, step=10, key=f"theo_{op}")
-    plan = st.sidebar.number_input(f"Planned Target UPD ({op})", value=2800, step=100, key=f"plan_{op}")
+    theo = st.sidebar.number_input(f"Theo Max UPD ({op})", value=20000, step=500, key=f"theo_{op}")
+    plan = st.sidebar.number_input(f"Planned Target ({op})", value=18000, step=500, key=f"plan_{op}")
     targets[op] = {'theo': theo, 'plan': plan}
     st.sidebar.write("") 
 
@@ -164,7 +174,6 @@ if filtered_df.empty:
 
 filtered_df['Duration_Hr'] = (filtered_df['CheckOutTime'] - filtered_df['CheckInTime']).dt.total_seconds() / 3600.0
 
-# Group by Tester AND OpNo
 tester_summary = filtered_df.groupby(['Tester', 'OpNo']).agg(
     Lot_Count=('LotNo', 'nunique'),
     Total_TestQty=('TestQty', 'sum'),
@@ -193,40 +202,12 @@ tester_summary['Avg_OEE'] = tester_summary['Avg_Gross_UPD'] / tester_summary['Th
 tester_summary = tester_summary.sort_values(by=['OpNo', 'Tester'], ascending=True)
 
 # ==============================================================================
-# --- 4. Dashboard UI (Overall + Tabs by Operation) ---
+# --- 4. Dashboard UI (Tabs fully isolating operations) ---
 # ==============================================================================
-st.markdown("### 📊 Overall Performance")
-
-# Overall Factory Level Metrics
-total_insertions = int(tester_summary['Total_TestQty'].sum())
-total_pass_insertions = int(tester_summary['Total_PassQty'].sum())
-avg_step_yield = (total_pass_insertions / total_insertions) * 100 if total_insertions > 0 else 0
-
-unique_lots_df = filtered_df.groupby('LotNo').agg(Max_TestQty=('TestQty', 'max')).reset_index()
-physical_lots = len(unique_lots_df)
-physical_units = int(unique_lots_df['Max_TestQty'].sum())
-
-active_testers = tester_summary['Tester'].nunique()
-
-c1, c2, c3, c4 = st.columns(4)
-with c1: 
-    st.markdown(f"""<div class='kpi-card'><div class='kpi-title'>Total Insertions (Gross)</div><div class='kpi-value'>{total_insertions:,}</div>
-        <div style='font-size: 12px; color: #888; margin-top: 5px;'>Est. Physical Units: ~{physical_units:,}</div></div>""", unsafe_allow_html=True)
-with c2: 
-    st.markdown(f"""<div class='kpi-card'><div class='kpi-title'>Pass Insertions (Net)</div><div class='kpi-value'>{total_pass_insertions:,}</div>
-        <div style='font-size: 12px; color: #888; margin-top: 5px;'>Total Lots: {physical_lots}</div></div>""", unsafe_allow_html=True)
-with c3: 
-    st.markdown(f"""<div class='kpi-card'><div class='kpi-title'>Avg Step Yield</div><div class='kpi-value'>{avg_step_yield:.2f}%</div>
-        <div style='font-size: 12px; color: #888; margin-top: 5px;'>Not Rolled Throughput Yield</div></div>""", unsafe_allow_html=True)
-with c4: 
-    st.markdown(f"""<div class='kpi-card'><div class='kpi-title'>Active Testers</div><div class='kpi-value'>{active_testers}</div>
-        <div style='font-size: 12px; color: #888; margin-top: 5px;'>Operations: {len(selected_ops)}</div></div>""", unsafe_allow_html=True)
-
-st.divider()
 st.markdown("## ATE Tester Capacity Analysis & Validation")
-st.caption("Each operation has distinct characteristics. Please review the performance by navigating the tabs below.")
+st.caption("Select an Operation tab below to view its isolated performance and capacity planning insights.")
 
-# Operation Tabs
+# 🌟 核心修正 2：建立多站點頁籤，並將 Overall Performance 全部移入頁籤內部
 tabs = st.tabs(selected_ops)
 
 for idx, op in enumerate(selected_ops):
@@ -240,21 +221,49 @@ for idx, op in enumerate(selected_ops):
             st.info(f"No data available for Operation {op} under the current filters.")
             continue
         
-        op_insertions = int(op_summary['Total_TestQty'].sum())
-        op_pass_insertions = int(op_summary['Total_PassQty'].sum())
+        # ---------------------------------------------------------
+        # Part A: Overall Performance (For this specific Operation)
+        # ---------------------------------------------------------
+        st.markdown("#### 📊 Overall Performance")
         
-        # --- 1. Period Performance Summary ---
+        total_insertions = int(op_summary['Total_TestQty'].sum())
+        total_pass_insertions = int(op_summary['Total_PassQty'].sum())
+        avg_step_yield = (total_pass_insertions / total_insertions) * 100 if total_insertions > 0 else 0
+        
+        unique_lots_df = op_df.groupby('LotNo').agg(Max_TestQty=('TestQty', 'max')).reset_index()
+        physical_lots = len(unique_lots_df)
+        physical_units = int(unique_lots_df['Max_TestQty'].sum())
+        active_testers = op_summary['Tester'].nunique()
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1: 
+            st.markdown(f"""<div class='kpi-card'><div class='kpi-title'>Total Insertions (Gross)</div><div class='kpi-value'>{total_insertions:,}</div>
+                <div style='font-size: 12px; color: #888; margin-top: 5px;'>Est. Physical Units: ~{physical_units:,}</div></div>""", unsafe_allow_html=True)
+        with c2: 
+            st.markdown(f"""<div class='kpi-card'><div class='kpi-title'>Pass Insertions (Net)</div><div class='kpi-value'>{total_pass_insertions:,}</div>
+                <div style='font-size: 12px; color: #888; margin-top: 5px;'>Total Lots: {physical_lots}</div></div>""", unsafe_allow_html=True)
+        with c3: 
+            st.markdown(f"""<div class='kpi-card'><div class='kpi-title'>Avg Step Yield</div><div class='kpi-value'>{avg_step_yield:.2f}%</div>
+                <div style='font-size: 12px; color: #888; margin-top: 5px;'>Operation Level Yield</div></div>""", unsafe_allow_html=True)
+        with c4: 
+            st.markdown(f"""<div class='kpi-card'><div class='kpi-title'>Active Testers</div><div class='kpi-value'>{active_testers}</div>
+                <div style='font-size: 12px; color: #888; margin-top: 5px;'>For Operation: {op}</div></div>""", unsafe_allow_html=True)
+
+        st.divider()
+
+        # ---------------------------------------------------------
+        # Part B: Period Performance Summary
+        # ---------------------------------------------------------
         st.markdown("#### 1. Period Performance Summary")
         st.caption(f"Note: 'Avg Rate' is a 24-hour prorated speed. This represents the weighted average for {op}.")
         
         total_op_days = op_summary['Active_Days'].sum()
-        # Weighted Average Calculation
-        global_gross_upd = (op_insertions / total_op_days) if total_op_days > 0 else 0
-        global_net_upd = (op_pass_insertions / total_op_days) if total_op_days > 0 else 0
+        global_gross_upd = (total_insertions / total_op_days) if total_op_days > 0 else 0
+        global_net_upd = (total_pass_insertions / total_op_days) if total_op_days > 0 else 0
         
         op_theo_val = targets[op]['theo']
         global_theo_qty = total_op_days * op_theo_val
-        global_oee = (op_insertions / global_theo_qty) * 100 if global_theo_qty > 0 else 0
+        global_oee = (total_insertions / global_theo_qty) * 100 if global_theo_qty > 0 else 0
 
         sc1, sc2, sc3 = st.columns(3)
         with sc1: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Actual Rate (Gross UPD)</div><div class='summary-value'>{global_gross_upd:,.0f}</div></div>", unsafe_allow_html=True)
@@ -263,7 +272,9 @@ for idx, op in enumerate(selected_ops):
 
         st.write("") 
 
-        # --- 2. Capacity Planning Insights ---
+        # ---------------------------------------------------------
+        # Part C: Capacity Planning Insights
+        # ---------------------------------------------------------
         st.markdown("#### 2. Capacity Planning Insights")
         
         op_plan_val = targets[op]['plan']
@@ -290,7 +301,9 @@ for idx, op in enumerate(selected_ops):
 
         st.write("")
 
-        # --- 3. Tester Performance Details ---
+        # ---------------------------------------------------------
+        # Part D: Tester Performance Details
+        # ---------------------------------------------------------
         st.markdown("#### 3. Tester Performance Details (A/P/Q Breakdown)")
         
         display_df = op_summary[[
@@ -317,7 +330,9 @@ for idx, op in enumerate(selected_ops):
 
         st.write("")
 
-        # --- 4. Chart ---
+        # ---------------------------------------------------------
+        # Part E: Chart
+        # ---------------------------------------------------------
         st.markdown("#### 4. Tester Throughput Comparison")
         
         fig = px.bar(
