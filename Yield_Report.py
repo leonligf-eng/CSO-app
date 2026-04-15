@@ -88,33 +88,32 @@ planned_upd = st.sidebar.number_input("Planned Target UPD", value=2800, step=100
 # --- 2. Main Area: Help Section & Filters ---
 # ==============================================================================
 
-# 🌟 NEW: 完整的中文定義說明展開區塊
-with st.expander("ℹ️ Help: 參數定義與計算公式 (Formula & Definitions)"):
+with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
     st.markdown("""
-    本系統採用嚴謹的 IE (工業工程) 邏輯，結合產線實際報表數據，推算出最真實的機台效率。各項指標定義如下：
+    This system employs rigorous Industrial Engineering (IE) logic combined with actual production report data to calculate authentic equipment efficiency. Metric definitions are as follows:
 
-    #### 1. 產能指標 (Capacity Metrics)
-    * **Gross UPD (實際吞吐量):** 採用 `TestQty` 計算，代表機台實際測試過的總顆數（包含良品與不良品）。此數據用來評估機台的「純生產速度」。
-    * **Net UPD (有效良品量):** 採用 `PassQty` 計算，代表機台產出的有效良品數。
-    * **運轉天數 (Active Days):** 機台在選定期間內，處於「正在測試中 (CheckIn ~ CheckOut)」的總時數除以 24 小時。
-    * **計算公式 (精準平均):** `Avg UPD = 期間內總顆數 / Active Days`。此算法排除了「零碎未滿一天」造成的平均值誤差。
+    #### 1. Capacity Metrics
+    * **Gross UPD (Actual Throughput):** Calculated using `TestQty`. Represents the total units processed by the tester (including pass and fail units). This metric evaluates the pure production speed.
+    * **Net UPD (Effective Good Units):** Calculated using `PassQty`. Represents the total valid good units produced.
+    * **Active Days:** The total number of hours a tester spent in the "Testing" state (CheckIn to CheckOut) within the selected period, divided by 24 hours.
+    * **Calculation (Precise Average):** `Avg UPD = Total Units in Period / Active Days`. This prevents average distortion caused by fragmented, incomplete days.
 
-    #### 2. OEE 設備綜合效率拆解 (Availability, Performance, Quality)
-    本系統採用 Top-Down 產出導向與傳統 A/P/Q 雙軌驗證，確保數據準確度。
-    * **A (稼動率 / Availability):** 衡量機台有多常在生產。
-      * `計算 = 實際運轉天數 (Active Days) / 報表首尾跨越的日曆天數 (Calendar Span)`
-    * **P (產能效率 / Performance):** 衡量機台運作時，有沒有達到理論該有的速度。
-      * `理論 UPH = Theoretical Max UPD / 24`
-      * `實際 UPH = 總測試量 (TestQty) / 實際運作總時數`
-      * `計算 = 實際 UPH / 理論 UPH`
-    * **Q (良率 / Quality):** 測試品質。
-      * `計算 = 總良品數 (PassQty) / 總測試數 (TestQty)`
-    * **整體 OEE (Overall OEE):**
-      * `計算 = 實際平均 Gross UPD / Theoretical Max UPD`。 (等同於 A × P 綜合表現)
+    #### 2. OEE Breakdown (Availability, Performance, Quality)
+    This system utilizes a Top-Down output-driven approach alongside traditional A/P/Q dual verification to ensure data accuracy.
+    * **A (Availability):** Measures how often the tester is actually in production.
+      * `Calculation = Active Days / Calendar Span Days (from first CheckIn to last CheckOut)`
+    * **P (Performance):** Measures if the tester is running at theoretical speed when active.
+      * `Theoretical UPH = Theoretical Max UPD / 24`
+      * `Actual UPH = Total TestQty / Total Active Hours`
+      * `Calculation = Actual UPH / Theoretical UPH`
+    * **Q (Quality):** Testing quality.
+      * `Calculation = Total PassQty / Total TestQty`
+    * **Overall OEE:**
+      * `Calculation = Avg Actual Gross UPD / Theoretical Max UPD`. (Mathematically equivalent to A × P)
 
-    #### 3. 產能規劃指標 (Capacity Planning)
-    * **Planned Target UPD (規劃基準):** 生管或工程師預設的安全排程水準（例如：2,800 ea/day）。
-    * **隱含 OEE (Implied OEE):** 該規劃基準佔理論 100% 產能的比例。`計算 = Planned Target UPD / Theoretical Max UPD`。這反映了排程預設保留了多少百分比作為換料、維修、重測的緩衝。
+    #### 3. Capacity Planning Metrics
+    * **Planned Target UPD:** The safety scheduling baseline preset by Planning or Engineering (e.g., 2,800 ea/day).
+    * **Implied OEE:** The ratio of the Planned Target against the 100% theoretical capacity. `Calculation = Planned Target UPD / Theoretical Max UPD`. This reflects the built-in buffer percentage reserved for setups, maintenance, and re-tests.
     """)
 
 st.markdown("### 🔍 Data Filters")
@@ -200,43 +199,43 @@ avg_net_upd = tester_summary['Avg_Net_UPD'].mean()
 avg_oee = tester_summary['Avg_OEE'].mean() * 100
 
 st.markdown("#### 1. Period Performance Summary")
-st.caption(f"共計 {valid_lots_count} 個有效批次 (排除 < {min_lot_size} ea)。 此數據採用「有效運作時數」精密折算。")
+st.caption(f"A total of {valid_lots_count} valid lots were tested (excluding lots < {min_lot_size} ea). Data is prorated based on exact active hours.")
 
 sc1, sc2, sc3 = st.columns(3)
 with sc1: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Actual UPD (TestQty)</div><div class='summary-value'>{avg_gross_upd:,.0f}</div></div>", unsafe_allow_html=True)
 with sc2: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Effective UPD (PassQty)</div><div class='summary-value'>{avg_net_upd:,.0f}</div></div>", unsafe_allow_html=True)
 with sc3: st.markdown(f"<div class='summary-card'><div class='summary-title'>Overall OEE</div><div class='summary-value'>{avg_oee:.1f}%</div></div>", unsafe_allow_html=True)
 
-st.markdown("#### 2. Capacity Planning Insights (結論與規劃建議)")
+st.markdown("#### 2. Capacity Planning Insights")
 buffer_pct = ((avg_gross_upd - planned_upd) / avg_gross_upd) * 100 if avg_gross_upd > 0 else 0
 implied_oee = (planned_upd / theo_max_upd) * 100 if theo_max_upd > 0 else 0
 
 if avg_gross_upd >= planned_upd:
     insight_text = f"""
-    驗證結果顯示，目前的 ATE Tester 實際產能平均約為 <span class='insight-highlight'>{avg_gross_upd:,.0f} ea/day</span>，高於您預估的規劃基準 <span class='insight-highlight'>{planned_upd:,.0f}</span>。<br>
-    如果您是以 {planned_upd:,.0f} 作為產能規劃 (Capacity Planning) 的基準，這是一個安全的設定，保留了約 <span class='insight-highlight'>{buffer_pct:.1f}%</span> 的緩衝空間以應對機台異常或換線損失。
+    Validation shows the current ATE Tester actual average capacity is approx. <span class='insight-highlight'>{avg_gross_upd:,.0f} ea/day</span>, surpassing your planned target of <span class='insight-highlight'>{planned_upd:,.0f}</span>.<br>
+    Using {planned_upd:,.0f} as your Capacity Planning baseline is a safe setting, preserving a <span class='insight-highlight'>{buffer_pct:.1f}%</span> capacity buffer to accommodate tester downtime or setup losses.
     """
 else:
     insight_text = f"""
-    ⚠️ <b>注意：</b> 目前的實際產能平均約為 <span class='insight-highlight'>{avg_gross_upd:,.0f} ea/day</span>，<b>低於</b>您預估的規劃基準 <span class='insight-highlight'>{planned_upd:,.0f}</span>。<br>
-    建議調降規劃基準，或檢視產線是否有異常 Downtime 導致產能未達標。
+    ⚠️ <b>Notice:</b> The current actual average capacity is approx. <span class='insight-highlight'>{avg_gross_upd:,.0f} ea/day</span>, which is <b>below</b> your planned target of <span class='insight-highlight'>{planned_upd:,.0f}</span>.<br>
+    It is recommended to lower the planning baseline or investigate the production line for abnormal downtime causing the shortfall.
     """
 
 st.markdown(f"<div class='insight-box'>{insight_text}</div>", unsafe_allow_html=True)
 
 insight_data = {
-    "指標 (Metric)": ["報表平均 UPD (TestQty)", "您規劃的預估 UPD", "理論最大 UPD", f"隱含 OEE (於 {planned_upd})"],
-    "數值 (Value)": [f"{avg_gross_upd:,.0f}", f"{planned_upd:,.0f}", f"{theo_max_upd:,.0f}", f"{implied_oee:.1f}%"],
-    "備註 (Note)": [
-        "實際產出吞吐量表現",
-        "目前設定的排程安全水準",
-        "100% OEE, 無停機/無異常",
-        "排程預設包含換料、異常之折損空間"
+    "Metric": ["Report Avg UPD (TestQty)", "Your Planned Target UPD", "Theoretical Max UPD", f"Implied OEE (at {planned_upd})"],
+    "Value": [f"{avg_gross_upd:,.0f}", f"{planned_upd:,.0f}", f"{theo_max_upd:,.0f}", f"{implied_oee:.1f}%"],
+    "Note": [
+        "Actual throughput performance",
+        "Current safety level for scheduling",
+        "100% OEE, zero downtime/re-tests",
+        "Assumed buffer for setups and abnormalities"
     ]
 }
 st.dataframe(pd.DataFrame(insight_data), use_container_width=True, hide_index=True)
 
-st.markdown("#### 3. Tester Performance Details (各機台表現明細與 A/P/Q 拆解)")
+st.markdown("#### 3. Tester Performance Details (A/P/Q Breakdown)")
 display_df = tester_summary[[
     'Tester', 'Lot_Count', 'Active_Days', 
     'Availability (A)', 'Performance (P)', 'Yield (Q)', 
@@ -244,15 +243,15 @@ display_df = tester_summary[[
 ]].copy()
 
 display_df = display_df.rename(columns={
-    'Tester': 'Tester', 'Lot_Count': 'Lot Count', 'Active_Days': 'Active Days (運轉天數)',
-    'Availability (A)': 'Availability (稼動率)', 'Performance (P)': 'Performance (效率)', 'Yield (Q)': 'Yield (良率)',
+    'Tester': 'Tester', 'Lot_Count': 'Lot Count', 'Active_Days': 'Active Days',
+    'Availability (A)': 'Availability (A)', 'Performance (P)': 'Performance (P)', 'Yield (Q)': 'Yield (Q)',
     'Avg_Gross_UPD': 'Avg UPD (TestQty)', 'Avg_Net_UPD': 'Avg UPD (PassQty)', 'Avg_OEE': 'Avg OEE'
 })
 
-display_df['Active Days (運轉天數)'] = display_df['Active Days (運轉天數)'].apply(lambda x: f"{x:.1f}")
-display_df['Availability (稼動率)'] = display_df['Availability (稼動率)'].apply(lambda x: f"{x*100:.1f}%")
-display_df['Performance (效率)'] = display_df['Performance (效率)'].apply(lambda x: f"{x*100:.1f}%")
-display_df['Yield (良率)'] = display_df['Yield (良率)'].apply(lambda x: f"{x*100:.1f}%")
+display_df['Active Days'] = display_df['Active Days'].apply(lambda x: f"{x:.1f}")
+display_df['Availability (A)'] = display_df['Availability (A)'].apply(lambda x: f"{x*100:.1f}%")
+display_df['Performance (P)'] = display_df['Performance (P)'].apply(lambda x: f"{x*100:.1f}%")
+display_df['Yield (Q)'] = display_df['Yield (Q)'].apply(lambda x: f"{x*100:.1f}%")
 display_df['Avg UPD (TestQty)'] = display_df['Avg UPD (TestQty)'].apply(lambda x: f"{x:,.0f}")
 display_df['Avg UPD (PassQty)'] = display_df['Avg UPD (PassQty)'].apply(lambda x: f"{x:,.0f}")
 display_df['Avg OEE'] = display_df['Avg OEE'].apply(lambda x: f"{x*100:.1f}%")
