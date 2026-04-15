@@ -4,7 +4,8 @@ import numpy as np
 import plotly.express as px
 from datetime import datetime, timedelta, time
 
-st.set_page_config(page_title="ATE Tester Capacity Analysis", layout="wide")
+# 🌟 更新系統名稱
+st.set_page_config(page_title="ATE Capacity & OEE Analyzer", layout="wide")
 
 # --- Custom CSS ---
 st.markdown("""
@@ -32,6 +33,35 @@ st.markdown("""
     }
     .stMultiSelect [data-baseweb="tag"] svg {
         fill: #0056b3 !important;
+    }
+    
+    /* 🌟 V25 新增：Tab 標籤頁視覺強化 */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        border-bottom: 2px solid #e0e0e0;
+    }
+    .stTabs [data-baseweb="tab"] {
+        font-size: 18px !important;
+        font-weight: 600 !important;
+        padding: 12px 24px !important;
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-bottom: none;
+        border-radius: 8px 8px 0 0;
+        color: #6c757d;
+        transition: all 0.2s ease-in-out;
+    }
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: #e2e6ea;
+        color: #495057;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #ffffff !important;
+        color: #0056b3 !important;
+        border-top: 4px solid #0056b3 !important;
+        border-left: 1px solid #dee2e6 !important;
+        border-right: 1px solid #dee2e6 !important;
+        box-shadow: 0 -3px 6px rgba(0,0,0,0.04);
     }
     </style>
 """, unsafe_allow_html=True)
@@ -86,7 +116,6 @@ def load_data(file):
             return None
     return generate_mock_data()
 
-# 支援 ODS 與 Excel 格式上傳
 uploaded_file = st.sidebar.file_uploader("Upload Yield Report", type=["xlsx", "xls", "ods"])
 raw_df = load_data(uploaded_file)
 
@@ -216,8 +245,6 @@ tester_summary['Actual_UPH'] = np.where(tester_summary['Total_Duration_Hr'] > 0,
 tester_summary['Performance (P)'] = tester_summary['Actual_UPH'] / (tester_summary['Theo_Max_UPD'] / 24.0)
 
 tester_summary['Yield (Q)'] = np.where(tester_summary['Total_TestQty'] > 0, tester_summary['Total_PassQty'] / tester_summary['Total_TestQty'], 0)
-
-# 🌟 核心修正：將 OEE 邏輯修復為傳統的 A * P，以真實反映設備綜合稼動效率
 tester_summary['Avg_OEE'] = tester_summary['Availability (A)'] * tester_summary['Performance (P)']
 
 tester_summary = tester_summary.sort_values(by=['OpNo', 'Tester'], ascending=True)
@@ -225,14 +252,15 @@ tester_summary = tester_summary.sort_values(by=['OpNo', 'Tester'], ascending=Tru
 # ==============================================================================
 # --- 4. Dashboard UI ---
 # ==============================================================================
-st.markdown("## ATE Tester Capacity Analysis & Validation")
+# 🌟 更新首頁大標題
+st.markdown("## 📊 ATE Capacity & OEE Analyzer")
 st.markdown("<p style='color: #444; font-size: 14px;'>Select an Operation tab below to view its isolated performance and capacity planning insights.</p>", unsafe_allow_html=True)
 
 tabs = st.tabs(selected_ops)
 
 for idx, op in enumerate(selected_ops):
     with tabs[idx]:
-        st.markdown(f"### 📍 Operation: {op}")
+        st.write("") # Spacer for better breathing room inside the tab
         
         op_df = filtered_df[filtered_df['OpNo'] == op]
         op_summary = tester_summary[tester_summary['OpNo'] == op]
@@ -244,7 +272,7 @@ for idx, op in enumerate(selected_ops):
         # ---------------------------------------------------------
         # Part A: Overall Performance 
         # ---------------------------------------------------------
-        st.markdown("#### 📊 Overall Performance")
+        st.markdown(f"#### 📈 Overall Performance ({op})")
         
         total_insertions = int(op_summary['Total_TestQty'].sum())
         total_pass_insertions = int(op_summary['Total_PassQty'].sum())
@@ -273,7 +301,6 @@ for idx, op in enumerate(selected_ops):
         global_gross_upd = (total_insertions / total_op_days) if total_op_days > 0 else 0
         global_net_upd = (total_pass_insertions / total_op_days) if total_op_days > 0 else 0
         
-        # 🌟 核心修正：全域 OEE 的分母必須使用 Calendar Span，才能真實反映設備綜合效率
         op_theo_val = targets[op]['theo']
         total_calendar_days = op_summary['Calendar_Span_Days'].sum()
         global_theo_qty = total_calendar_days * op_theo_val
