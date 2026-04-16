@@ -187,7 +187,6 @@ with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
     * **Implied OEE:** `Calculation = Planned Target UPD / Theoretical Max UPD`. Reflects the built-in buffer percentage reserved for setups, maintenance, and re-tests.
     """)
 
-# 🌟 V48: 將資料清洗規則(Lot Size)提前讀取，確保下拉選單能即時反應
 st.sidebar.header("⚙️ Data Cleaning Rules")
 min_lot_size = st.sidebar.number_input("Exclude Lots smaller than (Qty)", value=0, step=100)
 st.sidebar.divider()
@@ -218,11 +217,9 @@ if not filtered_by_op_prog.empty:
 else:
     curr_min_date, curr_max_date = global_min_date, global_max_date
 
-# 🌟 V46 核心防呆：在 session_state 中緩存極端日期，供 callback 使用
 st.session_state.curr_max_date_ref = curr_max_date
 st.session_state.curr_min_date_ref = curr_min_date
 
-# 若切換了站點或程式，重置日曆區間
 curr_selection_hash = hash(str(selected_ops) + str(selected_progs))
 if "last_selection_hash" not in st.session_state or st.session_state.last_selection_hash != curr_selection_hash:
     st.session_state.date_picker = (curr_min_date, curr_max_date)
@@ -231,10 +228,8 @@ if "last_selection_hash" not in st.session_state or st.session_state.last_select
 if "date_picker" not in st.session_state:
     st.session_state.date_picker = (curr_min_date, curr_max_date)
 
-# 🌟 V46 完美修復機制：定義 Callback 函數，在元件渲染「前」更新數值，杜絕報錯
 def update_date_range(days=None, to_max=False):
     val = st.session_state.date_picker
-    # 抓出目前的 Start Date (無論使用者點了幾下)
     if isinstance(val, tuple) and len(val) > 0:
         start_dt = val[0]
     elif isinstance(val, tuple) and len(val) == 0:
@@ -244,16 +239,12 @@ def update_date_range(days=None, to_max=False):
     else:
         start_dt = val
         
-    # 計算新的 End Date
     if to_max:
         new_end = st.session_state.curr_max_date_ref
     else:
         new_end = min(start_dt + timedelta(days=days), st.session_state.curr_max_date_ref)
         
-    # 防呆：確保 end date 永遠不會小於 start date
     new_end = max(start_dt, new_end)
-    
-    # 覆寫 session state
     st.session_state.date_picker = (start_dt, new_end)
 
 filter_col3, filter_col4 = st.columns([1, 1])
@@ -261,7 +252,6 @@ filter_col3, filter_col4 = st.columns([1, 1])
 with filter_col3:
     st.markdown("<p style='font-size: 14px; margin-bottom: 2px; color: #31333F;'>Select Date Range (CheckIn/Out Overlap)</p>", unsafe_allow_html=True)
     
-    # 日曆元件
     date_range = st.date_input(
         "Date Range", 
         key="date_picker", 
@@ -270,7 +260,6 @@ with filter_col3:
         label_visibility="collapsed"
     )
     
-    # 解析日期給下方過濾資料使用
     if isinstance(date_range, tuple):
         if len(date_range) == 2:
             start_date, end_date = date_range
@@ -281,7 +270,6 @@ with filter_col3:
     else:
         start_date = end_date = date_range
 
-    # 快捷操作按鈕列 (綁定 on_click 事件)
     st.markdown("<div style='margin-top: 5px;'></div>", unsafe_allow_html=True)
     c_btn1, c_btn2, c_btn3, c_btn4 = st.columns(4)
     
@@ -290,7 +278,7 @@ with filter_col3:
     c_btn3.button("+ 4 Weeks", use_container_width=True, on_click=update_date_range, kwargs={"days": 28})
     c_btn4.button("Max Range", use_container_width=True, on_click=update_date_range, kwargs={"to_max": True})
 
-# 🌟 V48 核心：在生成產品選項前，不僅過濾日期，也一併過濾掉數量小於 min_lot_size 的資料
+
 mask_stage_3 = (
     (filtered_by_op_prog['CheckInTime'].dt.date <= end_date) & 
     (filtered_by_op_prog['CheckOutTime'].dt.date >= start_date) &
@@ -300,14 +288,12 @@ filtered_by_op_prog_date = filtered_by_op_prog[mask_stage_3]
 
 prod_options = sorted(filtered_by_op_prog_date['ProductNo'].dropna().unique().tolist())
 
-# 🌟 V48：將 min_lot_size 加入上游雜湊監聽器，確保調整排除數量時，也能觸發產品「自動全選」
 upstream_hash = hash(str(selected_ops) + str(selected_progs) + str(start_date) + str(end_date) + str(min_lot_size))
 if "upstream_hash" not in st.session_state or st.session_state.upstream_hash != upstream_hash:
-    st.session_state.prod_select_widget = prod_options  # 強制覆寫為全選
-    st.session_state.upstream_hash = upstream_hash      # 記錄當前狀態
+    st.session_state.prod_select_widget = prod_options  
+    st.session_state.upstream_hash = upstream_hash      
 
 with filter_col4:
-    # 不再依賴 default，直接透過 key 控制 session_state 實現動態全選
     selected_prods = st.multiselect(
         "Select Product (ProductNo)", 
         options=prod_options, 
@@ -317,8 +303,38 @@ with filter_col4:
 st.divider()
 
 # ==============================================================================
-# --- 2. Sidebar Settings (Targets) ---
+# --- 2. Sidebar Settings (Calculator & Targets) ---
 # ==============================================================================
+
+# 🌟 V50 核心：精簡版 Capacity Calculator (專注於單機產能試算)
+st.sidebar.header("🧮 Capacity Calculator")
+with st.sidebar.expander("Detailed Parameters", expanded=False):
+    calc_lot_size = st.number_input("Lot Size", value=6600, step=100)
+    calc_site = st.selectbox("Site", options=[1, 2, 4, 8, 16, 32, 64, 128, 256], index=3) # 預設為 8
+    calc_test_time = st.number_input("Test Time (s)", value=150.00, step=1.00, format="%.2f")
+    calc_fpy = st.number_input("FPY %", value=95.00, step=1.00, format="%.2f")
+    calc_oee = st.number_input("OEE %", value=70.00, step=1.00, format="%.2f")
+    
+    # 單機產能計算邏輯 (Net UPD)
+    if calc_test_time > 0:
+        single_cap = (86400 / calc_test_time) * calc_site * (calc_oee / 100.0) * (calc_fpy / 100.0)
+    else:
+        single_cap = 0
+        
+    # 渲染純粹的計算結果面板
+    st.markdown(f"""
+        <div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px; border: 1px solid #dee2e6; text-align: center;'>
+            <div style='font-size: 11px; color: #6c757d; font-weight: bold; text-transform: uppercase; margin-bottom: 5px; letter-spacing: 0.5px;'>
+                Single Capacity (UPD)
+            </div>
+            <div style='font-size: 26px; color: #1E3A8A; font-weight: bold;'>
+                🚀 {single_cap:,.0f} <span style='font-size: 13px; color: #6c757d;'>units/day</span>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+st.sidebar.divider()
+
 st.sidebar.header("📐 Planning & Targets")
 st.sidebar.markdown("<p style='color: #444; font-size: 13px;'>Define specific baselines for EACH selected operation.</p>", unsafe_allow_html=True)
 
