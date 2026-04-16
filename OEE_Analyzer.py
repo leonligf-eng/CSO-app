@@ -150,7 +150,7 @@ with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
     #### 1. Capacity Metrics (Tester View vs. Product View)
     * **Test Qty:** Total testing actions performed by the testers across all operations.
     * **Active Days:** The exact number of hours a tester spent in the "Testing" state (CheckIn to CheckOut), divided by 24 hours.
-    * **Avg Test UPD:** Calculated as `Total Test Qty / Active Days`. 
+    * **Normalized UPD:** Calculated as `Total Qty / Active Days`. This metric converts the actual volume tested over a specific time period into an equivalent 24-hour rate for standardized comparison.
 
     #### 2. OEE Breakdown (Availability, Performance, Quality)
     * **A (Availability):** Measures how often the tester is actually in production.
@@ -267,7 +267,6 @@ if filtered_df.empty:
 
 filtered_df['Duration_Hr'] = (filtered_df['CheckOutTime'] - filtered_df['CheckInTime']).dt.total_seconds() / 3600.0
 
-# Empty Days 計算保留 (用於 Availability 精準計算)
 df_sorted = filtered_df.sort_values(by=['Tester', 'OpNo', 'CheckInTime']).copy()
 df_sorted['Next_CheckIn'] = df_sorted.groupby(['Tester', 'OpNo'])['CheckInTime'].shift(-1)
 df_sorted['Gap_Days'] = (df_sorted['Next_CheckIn'] - df_sorted['CheckOutTime']).dt.total_seconds() / 86400.0
@@ -350,7 +349,7 @@ for idx, op in enumerate(selected_ops):
         # Part B: Period Performance Summary
         # ---------------------------------------------------------
         st.markdown("#### 1. Period Performance Summary")
-        st.markdown("<p style='color: #444; font-size: 14px;'>Note: 'Avg UPD' is a 24-hour prorated speed. This represents the weighted average for the operation.</p>", unsafe_allow_html=True)
+        st.markdown("<p style='color: #444; font-size: 14px;'>Note: Normalized UPD is a 24-hour equivalent speed based on actual test time.</p>", unsafe_allow_html=True)
         
         total_op_days = op_summary['Active_Days'].sum()
         global_gross_upd = (total_insertions / total_op_days) if total_op_days > 0 else 0
@@ -362,8 +361,8 @@ for idx, op in enumerate(selected_ops):
         global_oee = (total_insertions / global_theo_qty) * 100 if global_theo_qty > 0 else 0
 
         sc1, sc2, sc3 = st.columns(3)
-        with sc1: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Test UPD</div><div class='summary-value'>{global_gross_upd:,.0f}</div></div>", unsafe_allow_html=True)
-        with sc2: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Pass UPD</div><div class='summary-value'>{global_net_upd:,.0f}</div></div>", unsafe_allow_html=True)
+        with sc1: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Test Normalized UPD</div><div class='summary-value'>{global_gross_upd:,.0f}</div></div>", unsafe_allow_html=True)
+        with sc2: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Pass Normalized UPD</div><div class='summary-value'>{global_net_upd:,.0f}</div></div>", unsafe_allow_html=True)
         with sc3: st.markdown(f"<div class='summary-card'><div class='summary-title'>Overall OEE</div><div class='summary-value'>{global_oee:.1f}%</div></div>", unsafe_allow_html=True)
 
         st.write("") 
@@ -390,7 +389,7 @@ for idx, op in enumerate(selected_ops):
         st.markdown(f"<div class='insight-box'>{insight_text}</div>", unsafe_allow_html=True)
 
         insight_data = {
-            "Metric": ["Report Avg UPD (Actual)", "Planned Target UPD", "Theoretical Max UPD", f"Implied OEE (at {op_plan_val})"],
+            "Metric": ["Report Avg Normalized UPD", "Planned Target UPD", "Theoretical Max UPD", f"Implied OEE (at {op_plan_val})"],
             "Value": [f"{global_gross_upd:,.0f}", f"{op_plan_val:,.0f}", f"{op_theo_val:,.0f}", f"{implied_oee:.1f}%"]
         }
         st.dataframe(pd.DataFrame(insight_data).T, use_container_width=True, hide_index=True)
@@ -402,24 +401,28 @@ for idx, op in enumerate(selected_ops):
         # ---------------------------------------------------------
         st.markdown("#### 3. Tester Performance Details (A/P/Q Breakdown)")
         
-        # 🌟 移除 Empty_Days 顯示
         display_df = op_summary[[
             'Tester', 'Lot_Count', 'First_Yield', 'Final_Yield (Q)', 
-            'Avg_Gross_UPD', 'Avg_Net_UPD', 'Avg_OEE',
+            'Total_TestQty', 'Avg_Gross_UPD', 'Total_PassQty', 'Avg_Net_UPD', 'Avg_OEE',
             'Active_Days', 'Availability (A)', 'Performance (P)'
         ]].copy()
 
+        # 🌟 V42: 變更為 Normalized UPD
         display_df = display_df.rename(columns={
             'Tester': 'Tester', 'Lot_Count': 'Lot Count', 
             'First_Yield': 'First Yield', 'Final_Yield (Q)': 'Final Yield (Q)',
-            'Avg_Gross_UPD': 'Avg TestQty UPD', 'Avg_Net_UPD': 'Avg PassQty UPD', 'Avg_OEE': 'Avg OEE',
+            'Total_TestQty': 'Actual Test Qty', 'Avg_Gross_UPD': 'Normalized UPD (Test)', 
+            'Total_PassQty': 'Actual Pass Qty', 'Avg_Net_UPD': 'Normalized UPD (Pass)', 
+            'Avg_OEE': 'Avg OEE',
             'Active_Days': 'Active Days', 'Availability (A)': 'Availability (A)', 'Performance (P)': 'Performance (P)'
         })
 
         display_df['First Yield'] = display_df['First Yield'].apply(lambda x: f"{x*100:.2f}%")
         display_df['Final Yield (Q)'] = display_df['Final Yield (Q)'].apply(lambda x: f"{x*100:.2f}%")
-        display_df['Avg TestQty UPD'] = display_df['Avg TestQty UPD'].apply(lambda x: f"{x:,.0f}")
-        display_df['Avg PassQty UPD'] = display_df['Avg PassQty UPD'].apply(lambda x: f"{x:,.0f}")
+        display_df['Actual Test Qty'] = display_df['Actual Test Qty'].apply(lambda x: f"{x:,.0f}")
+        display_df['Normalized UPD (Test)'] = display_df['Normalized UPD (Test)'].apply(lambda x: f"{x:,.0f}")
+        display_df['Actual Pass Qty'] = display_df['Actual Pass Qty'].apply(lambda x: f"{x:,.0f}")
+        display_df['Normalized UPD (Pass)'] = display_df['Normalized UPD (Pass)'].apply(lambda x: f"{x:,.0f}")
         display_df['Avg OEE'] = display_df['Avg OEE'].apply(lambda x: f"{x*100:.1f}%")
         display_df['Active Days'] = display_df['Active Days'].apply(lambda x: f"{x:.2f}")
         display_df['Availability (A)'] = display_df['Availability (A)'].apply(lambda x: f"{x*100:.1f}%")
@@ -433,9 +436,10 @@ for idx, op in enumerate(selected_ops):
             except: pass
             return ''
         
-        # 🌟 強制設定 Header 與 Content 置中
+        # 🌟 維持弱化 Normalized UPD 顯示
         styled_df = display_df.style\
             .map(lambda x: highlight_low_oee(x, implied_oee), subset=['Avg OEE'])\
+            .map(lambda _: 'color: #888888; font-size: 0.9em;', subset=['Normalized UPD (Test)', 'Normalized UPD (Pass)'])\
             .set_properties(**{'text-align': 'center'})\
             .set_table_styles([{'selector': 'th', 'props': [('text-align', 'center')]}])
             
@@ -448,17 +452,17 @@ for idx, op in enumerate(selected_ops):
         # ---------------------------------------------------------
         st.markdown("#### 4. Visualizations")
         
-        # 同步圖表上的名詞標籤
-        plot_df = op_summary.rename(columns={'Avg_Gross_UPD': 'Avg Test UPD', 'Avg_Net_UPD': 'Avg Pass UPD'})
+        # 🌟 同步更新視覺化標籤
+        plot_df = op_summary.rename(columns={'Avg_Gross_UPD': 'Normalized UPD (Test)', 'Avg_Net_UPD': 'Normalized UPD (Pass)'})
         
         fig1 = px.bar(
             plot_df, 
             x='Tester', 
-            y=['Avg Test UPD', 'Avg Pass UPD'], 
+            y=['Normalized UPD (Test)', 'Normalized UPD (Pass)'], 
             barmode='group',
             title=f"Throughput Comparison & Target Validation ({op})",
-            labels={'value': 'Prorated UPD', 'variable': 'Metrics', 'Tester': ''},
-            color_discrete_map={'Avg Test UPD': '#1E3A8A', 'Avg Pass UPD': '#28a745'}
+            labels={'value': 'Equivalent Rate (UPD)', 'variable': 'Metrics', 'Tester': ''},
+            color_discrete_map={'Normalized UPD (Test)': '#1E3A8A', 'Normalized UPD (Pass)': '#28a745'}
         )
         fig1.add_hline(y=op_plan_val, line_dash="dash", line_color="orange", annotation_text="Planned Target", annotation_position="top right")
         fig1.add_hline(y=op_theo_val, line_dash="dot", line_color="red", annotation_text="Theoretical Max", annotation_position="top right")
@@ -500,4 +504,4 @@ for idx, op in enumerate(selected_ops):
         # ---------------------------------------------------------
         st.markdown("#### 5. Raw Data")
         with st.expander(f"Click to view raw data for {op}"):
-            st.dataframe(op_df, use_container_width=True, hide_index=True)
+            st.dataframe(op_df, use_container_width=True, hide_index=True)#41: ㄍ
