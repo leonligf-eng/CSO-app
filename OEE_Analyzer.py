@@ -293,12 +293,19 @@ filtered_by_op_prog_date = filtered_by_op_prog[mask_stage_3]
 
 prod_options = sorted(filtered_by_op_prog_date['ProductNo'].dropna().unique().tolist())
 
-if 'saved_prods' not in st.session_state: st.session_state.saved_prods = []
-def update_prods(): st.session_state.saved_prods = st.session_state.prod_select_widget
-valid_defaults_prod = [p for p in st.session_state.saved_prods if p in prod_options]
+# 🌟 V47 核心：偵測上游條件變化 (OpNo, Program, Date)，若改變則自動全選 ProductNo
+upstream_hash = hash(str(selected_ops) + str(selected_progs) + str(start_date) + str(end_date))
+if "upstream_hash" not in st.session_state or st.session_state.upstream_hash != upstream_hash:
+    st.session_state.prod_select_widget = prod_options  # 強制覆寫為全選
+    st.session_state.upstream_hash = upstream_hash      # 記錄當前狀態
 
 with filter_col4:
-    selected_prods = st.multiselect("Select Product (ProductNo)", options=prod_options, default=valid_defaults_prod, key="prod_select_widget", on_change=update_prods)
+    # 不再依賴 default，直接透過 key 控制 session_state 實現動態全選
+    selected_prods = st.multiselect(
+        "Select Product (ProductNo)", 
+        options=prod_options, 
+        key="prod_select_widget"
+    )
 
 st.divider()
 
@@ -471,7 +478,7 @@ for idx, op in enumerate(selected_ops):
         st.write("")
 
         # ---------------------------------------------------------
-        # Part D: Tester Performance Details 
+        # Part D: Tester Performance Details
         # ---------------------------------------------------------
         st.markdown("#### 3. Tester Performance Details (A/P/Q Breakdown)")
         
