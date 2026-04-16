@@ -69,6 +69,14 @@ st.markdown("""
     [data-testid="stDataFrame"] td {
         text-align: center !important;
     }
+    
+    /* 🌟 優化 Quick Action 按鈕的外觀，使其像一個工具列 */
+    div[data-testid="column"] button {
+        padding: 0.2rem 0.5rem !important;
+        font-size: 0.85rem !important;
+        min-height: 32px !important;
+        border-radius: 4px !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -205,19 +213,65 @@ if not filtered_by_op_prog.empty:
 else:
     curr_min_date, curr_max_date = global_min_date, global_max_date
 
+# 🌟 V44 核心：防呆機制，當更換 OpNo 或 Program 時，自動重置日期範圍
+curr_selection_hash = hash(str(selected_ops) + str(selected_progs))
+if "last_selection_hash" not in st.session_state or st.session_state.last_selection_hash != curr_selection_hash:
+    st.session_state.date_start = curr_min_date
+    st.session_state.date_end = curr_max_date
+    st.session_state.last_selection_hash = curr_selection_hash
+
+# 初始化安全卡控
+if "date_start" not in st.session_state: st.session_state.date_start = curr_min_date
+if "date_end" not in st.session_state: st.session_state.date_end = curr_max_date
+st.session_state.date_start = max(min(st.session_state.date_start, curr_max_date), curr_min_date)
+st.session_state.date_end = max(min(st.session_state.date_end, curr_max_date), st.session_state.date_start)
+
 filter_col3, filter_col4 = st.columns([1, 1])
 
+# 🌟 V44 核心：智慧快選日期工具列 (Smart Date Toolbar)
 with filter_col3:
+    st.markdown("<p style='font-size: 14px; margin-bottom: 2px; color: #31333F;'>Select Date Range (CheckIn/Out Overlap)</p>", unsafe_allow_html=True)
+    
     date_range = st.date_input(
-        "Select Date Range (CheckIn/Out Overlap)", 
-        value=(curr_min_date, curr_max_date), 
+        "Date Range", 
+        value=(st.session_state.date_start, st.session_state.date_end), 
         min_value=global_min_date, 
-        max_value=global_max_date
+        max_value=global_max_date,
+        label_visibility="collapsed" # 隱藏原生 Label，使用上方的 Markdown
     )
+    
+    # 解析原生 Date_input 回傳值
     if isinstance(date_range, tuple) and len(date_range) == 2:
-        start_date, end_date = date_range
+        temp_start, temp_end = date_range
+    elif isinstance(date_range, tuple) and len(date_range) == 1:
+        temp_start = temp_end = date_range[0]
     else:
-        start_date = end_date = date_range[0] if isinstance(date_range, (list, tuple)) else date_range
+        temp_start = temp_end = date_range
+        
+    # 更新目前狀態
+    st.session_state.date_start = temp_start
+    st.session_state.date_end = temp_end
+
+    # 快捷操作按鈕列
+    st.markdown("<div style='margin-top: 5px;'></div>", unsafe_allow_html=True)
+    c_btn1, c_btn2, c_btn3, c_btn4 = st.columns(4)
+    
+    if c_btn1.button("+ 1 Week", use_container_width=True, help="Set End Date to 1 Week after Start Date"):
+        st.session_state.date_end = min(st.session_state.date_start + timedelta(days=7), curr_max_date)
+        st.rerun()
+    if c_btn2.button("+ 2 Weeks", use_container_width=True, help="Set End Date to 2 Weeks after Start Date"):
+        st.session_state.date_end = min(st.session_state.date_start + timedelta(days=14), curr_max_date)
+        st.rerun()
+    if c_btn3.button("+ 4 Weeks", use_container_width=True, help="Set End Date to 4 Weeks after Start Date"):
+        st.session_state.date_end = min(st.session_state.date_start + timedelta(days=28), curr_max_date)
+        st.rerun()
+    if c_btn4.button("Max Range", use_container_width=True, help="Expand to the last available production date"):
+        st.session_state.date_end = curr_max_date
+        st.rerun()
+
+# 將最終決定的起迄日期交給底層過濾器
+start_date = st.session_state.date_start
+end_date = st.session_state.date_end
 
 mask_stage_3 = (
     (filtered_by_op_prog['CheckInTime'].dt.date <= end_date) & 
@@ -405,11 +459,10 @@ for idx, op in enumerate(selected_ops):
         st.write("")
 
         # ---------------------------------------------------------
-        # Part D: Tester Performance Details (🌟 V43: 排序與置中微調)
+        # Part D: Tester Performance Details (🌟 排序微調)
         # ---------------------------------------------------------
         st.markdown("#### 3. Tester Performance Details (A/P/Q Breakdown)")
         
-        # 🌟 依照指定順序提取欄位
         display_df = op_summary[[
             'Tester', 'Lot_Count', 'First_Yield', 'Final_Yield (Q)', 
             'Avg_Gross_UPD', 'Avg_Net_UPD', 'Total_TestQty', 'Total_PassQty', 'Avg_OEE',
@@ -444,7 +497,6 @@ for idx, op in enumerate(selected_ops):
             except: pass
             return ''
         
-        # 🌟 取消顏色弱化，並設定 Pandas Styler 置中對齊
         styled_df = display_df.style\
             .map(lambda x: highlight_low_oee(x, implied_oee), subset=['Avg OEE'])\
             .set_properties(**{'text-align': 'center'})\
