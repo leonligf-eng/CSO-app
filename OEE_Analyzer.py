@@ -80,6 +80,9 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# 🌟 V51 核心修正：將主標題移至最頂層，確保無論有無資料都會顯示
+st.markdown("# 📈 ATE OEE Analyzer")
+
 # ==============================================================================
 # --- 0. Mock Data Generator ---
 # ==============================================================================
@@ -306,22 +309,19 @@ st.divider()
 # --- 2. Sidebar Settings (Calculator & Targets) ---
 # ==============================================================================
 
-# 🌟 V50 核心：精簡版 Capacity Calculator (專注於單機產能試算)
 st.sidebar.header("🧮 Capacity Calculator")
 with st.sidebar.expander("Detailed Parameters", expanded=False):
     calc_lot_size = st.number_input("Lot Size", value=6600, step=100)
-    calc_site = st.selectbox("Site", options=[1, 2, 4, 8, 16, 32, 64, 128, 256], index=3) # 預設為 8
+    calc_site = st.selectbox("Site", options=[1, 2, 4, 8, 16, 32, 64, 128, 256], index=3)
     calc_test_time = st.number_input("Test Time (s)", value=150.00, step=1.00, format="%.2f")
     calc_fpy = st.number_input("FPY %", value=95.00, step=1.00, format="%.2f")
     calc_oee = st.number_input("OEE %", value=70.00, step=1.00, format="%.2f")
     
-    # 單機產能計算邏輯 (Net UPD)
     if calc_test_time > 0:
         single_cap = (86400 / calc_test_time) * calc_site * (calc_oee / 100.0) * (calc_fpy / 100.0)
     else:
         single_cap = 0
         
-    # 渲染純粹的計算結果面板
     st.markdown(f"""
         <div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px; border: 1px solid #dee2e6; text-align: center;'>
             <div style='font-size: 11px; color: #6c757d; font-weight: bold; text-transform: uppercase; margin-bottom: 5px; letter-spacing: 0.5px;'>
@@ -410,7 +410,6 @@ tester_summary = tester_summary.sort_values(by=['OpNo', 'Tester'], ascending=Tru
 # ==============================================================================
 # --- 4. Dashboard UI ---
 # ==============================================================================
-st.markdown("## 📊 ATE Capacity & OEE Analyzer")
 st.markdown("<p style='color: #444; font-size: 14px;'>Select an Operation tab below to view its isolated performance and capacity planning insights.</p>", unsafe_allow_html=True)
 
 tabs = st.tabs(selected_ops)
