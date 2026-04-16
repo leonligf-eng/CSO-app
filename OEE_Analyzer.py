@@ -187,6 +187,11 @@ with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
     * **Implied OEE:** `Calculation = Planned Target UPD / Theoretical Max UPD`. Reflects the built-in buffer percentage reserved for setups, maintenance, and re-tests.
     """)
 
+# 🌟 V48: 將資料清洗規則(Lot Size)提前讀取，確保下拉選單能即時反應
+st.sidebar.header("⚙️ Data Cleaning Rules")
+min_lot_size = st.sidebar.number_input("Exclude Lots smaller than (Qty)", value=0, step=100)
+st.sidebar.divider()
+
 st.markdown("### 🔍 Data Filters")
 
 filter_col1, filter_col2 = st.columns([1, 1])
@@ -285,16 +290,18 @@ with filter_col3:
     c_btn3.button("+ 4 Weeks", use_container_width=True, on_click=update_date_range, kwargs={"days": 28})
     c_btn4.button("Max Range", use_container_width=True, on_click=update_date_range, kwargs={"to_max": True})
 
+# 🌟 V48 核心：在生成產品選項前，不僅過濾日期，也一併過濾掉數量小於 min_lot_size 的資料
 mask_stage_3 = (
     (filtered_by_op_prog['CheckInTime'].dt.date <= end_date) & 
-    (filtered_by_op_prog['CheckOutTime'].dt.date >= start_date)
+    (filtered_by_op_prog['CheckOutTime'].dt.date >= start_date) &
+    (filtered_by_op_prog['TestQty'] >= min_lot_size)
 )
 filtered_by_op_prog_date = filtered_by_op_prog[mask_stage_3]
 
 prod_options = sorted(filtered_by_op_prog_date['ProductNo'].dropna().unique().tolist())
 
-# 🌟 V47 核心：偵測上游條件變化 (OpNo, Program, Date)，若改變則自動全選 ProductNo
-upstream_hash = hash(str(selected_ops) + str(selected_progs) + str(start_date) + str(end_date))
+# 🌟 V48：將 min_lot_size 加入上游雜湊監聽器，確保調整排除數量時，也能觸發產品「自動全選」
+upstream_hash = hash(str(selected_ops) + str(selected_progs) + str(start_date) + str(end_date) + str(min_lot_size))
 if "upstream_hash" not in st.session_state or st.session_state.upstream_hash != upstream_hash:
     st.session_state.prod_select_widget = prod_options  # 強制覆寫為全選
     st.session_state.upstream_hash = upstream_hash      # 記錄當前狀態
@@ -310,12 +317,8 @@ with filter_col4:
 st.divider()
 
 # ==============================================================================
-# --- 2. Sidebar Settings ---
+# --- 2. Sidebar Settings (Targets) ---
 # ==============================================================================
-st.sidebar.header("⚙️ Data Cleaning Rules")
-min_lot_size = st.sidebar.number_input("Exclude Lots smaller than (Qty)", value=0, step=100)
-
-st.sidebar.divider()
 st.sidebar.header("📐 Planning & Targets")
 st.sidebar.markdown("<p style='color: #444; font-size: 13px;'>Define specific baselines for EACH selected operation.</p>", unsafe_allow_html=True)
 
@@ -336,8 +339,7 @@ if not selected_ops or not selected_progs or not selected_prods:
 # --- 3. Data Processing Engine ---
 # ==============================================================================
 mask_final = (
-    filtered_by_op_prog_date['ProductNo'].isin(selected_prods) &
-    (filtered_by_op_prog_date['TestQty'] >= min_lot_size)
+    filtered_by_op_prog_date['ProductNo'].isin(selected_prods)
 )
 
 filtered_df = filtered_by_op_prog_date[mask_final].copy()
