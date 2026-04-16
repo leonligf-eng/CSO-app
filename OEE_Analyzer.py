@@ -70,7 +70,7 @@ st.markdown("""
         text-align: center !important;
     }
     
-    /* 🌟 優化 Quick Action 按鈕的外觀，使其像一個工具列 */
+    /* 🌟 優化 Quick Action 按鈕的外觀 */
     div[data-testid="column"] button {
         padding: 0.2rem 0.5rem !important;
         font-size: 0.85rem !important;
@@ -213,66 +213,77 @@ if not filtered_by_op_prog.empty:
 else:
     curr_min_date, curr_max_date = global_min_date, global_max_date
 
-# 🌟 V45 核心：防呆機制，當更換 OpNo 或 Program 時，重置日期區間的 Session State
+# 🌟 V46 核心防呆：在 session_state 中緩存極端日期，供 callback 使用
+st.session_state.curr_max_date_ref = curr_max_date
+st.session_state.curr_min_date_ref = curr_min_date
+
+# 若切換了站點或程式，重置日曆區間
 curr_selection_hash = hash(str(selected_ops) + str(selected_progs))
 if "last_selection_hash" not in st.session_state or st.session_state.last_selection_hash != curr_selection_hash:
     st.session_state.date_picker = (curr_min_date, curr_max_date)
     st.session_state.last_selection_hash = curr_selection_hash
 
-# 初始化日曆元件的 Key
 if "date_picker" not in st.session_state:
     st.session_state.date_picker = (curr_min_date, curr_max_date)
 
+# 🌟 V46 完美修復機制：定義 Callback 函數，在元件渲染「前」更新數值，杜絕報錯
+def update_date_range(days=None, to_max=False):
+    val = st.session_state.date_picker
+    # 抓出目前的 Start Date (無論使用者點了幾下)
+    if isinstance(val, tuple) and len(val) > 0:
+        start_dt = val[0]
+    elif isinstance(val, tuple) and len(val) == 0:
+        start_dt = st.session_state.curr_min_date_ref
+    elif val is None:
+        start_dt = st.session_state.curr_min_date_ref
+    else:
+        start_dt = val
+        
+    # 計算新的 End Date
+    if to_max:
+        new_end = st.session_state.curr_max_date_ref
+    else:
+        new_end = min(start_dt + timedelta(days=days), st.session_state.curr_max_date_ref)
+        
+    # 防呆：確保 end date 永遠不會小於 start date
+    new_end = max(start_dt, new_end)
+    
+    # 覆寫 session state
+    st.session_state.date_picker = (start_dt, new_end)
+
 filter_col3, filter_col4 = st.columns([1, 1])
 
-# 🌟 V45 核心：修復日曆雙擊 Bug 與智慧快選工具列
 with filter_col3:
     st.markdown("<p style='font-size: 14px; margin-bottom: 2px; color: #31333F;'>Select Date Range (CheckIn/Out Overlap)</p>", unsafe_allow_html=True)
     
-    # 讓 Streamlit 使用 key 原生接管選取狀態，我們不再強行覆寫 Value
+    # 日曆元件
     date_range = st.date_input(
         "Date Range", 
-        key="date_picker", # 綁定 Session State
+        key="date_picker", 
         min_value=global_min_date, 
         max_value=global_max_date,
         label_visibility="collapsed"
     )
     
-    # 安全萃取起迄日 (供底層過濾與按鈕運算使用)
+    # 解析日期給下方過濾資料使用
     if isinstance(date_range, tuple):
         if len(date_range) == 2:
             start_date, end_date = date_range
-        elif len(date_range) == 1: # 使用者剛點下第一下的懸空狀態
+        elif len(date_range) == 1:
             start_date = end_date = date_range[0]
-        else: # 防呆: 空 Tuple
+        else:
             start_date = end_date = curr_min_date
     else:
         start_date = end_date = date_range
 
-    # 快捷操作按鈕列
+    # 快捷操作按鈕列 (綁定 on_click 事件)
     st.markdown("<div style='margin-top: 5px;'></div>", unsafe_allow_html=True)
     c_btn1, c_btn2, c_btn3, c_btn4 = st.columns(4)
     
-    # 按鈕邏輯：計算新的區間並更新 session_state，加入防呆 max/min 卡控避免當機
-    if c_btn1.button("+ 1 Week", use_container_width=True, help="Set End Date to 1 Week after Start Date"):
-        new_end = max(start_date, min(start_date + timedelta(days=7), curr_max_date))
-        st.session_state.date_picker = (start_date, new_end)
-        st.rerun()
-        
-    if c_btn2.button("+ 2 Weeks", use_container_width=True, help="Set End Date to 2 Weeks after Start Date"):
-        new_end = max(start_date, min(start_date + timedelta(days=14), curr_max_date))
-        st.session_state.date_picker = (start_date, new_end)
-        st.rerun()
-        
-    if c_btn3.button("+ 4 Weeks", use_container_width=True, help="Set End Date to 4 Weeks after Start Date"):
-        new_end = max(start_date, min(start_date + timedelta(days=28), curr_max_date))
-        st.session_state.date_picker = (start_date, new_end)
-        st.rerun()
-        
-    if c_btn4.button("Max Range", use_container_width=True, help="Expand to the last available production date"):
-        st.session_state.date_picker = (start_date, max(start_date, curr_max_date))
-        st.rerun()
-
+    c_btn1.button("+ 1 Week", use_container_width=True, on_click=update_date_range, kwargs={"days": 7})
+    c_btn2.button("+ 2 Weeks", use_container_width=True, on_click=update_date_range, kwargs={"days": 14})
+    c_btn3.button("+ 4 Weeks", use_container_width=True, on_click=update_date_range, kwargs={"days": 28})
+    c_btn4.button("Max Range", use_container_width=True, on_click=update_date_range, kwargs={"to_max": True})
 
 mask_stage_3 = (
     (filtered_by_op_prog['CheckInTime'].dt.date <= end_date) & 
@@ -460,7 +471,7 @@ for idx, op in enumerate(selected_ops):
         st.write("")
 
         # ---------------------------------------------------------
-        # Part D: Tester Performance Details
+        # Part D: Tester Performance Details 
         # ---------------------------------------------------------
         st.markdown("#### 3. Tester Performance Details (A/P/Q Breakdown)")
         
