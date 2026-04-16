@@ -156,12 +156,13 @@ with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
 
     #### 2. OEE Breakdown (Availability, Performance, Quality)
     * **A (Availability):** Measures how often the tester is actually in production.
-      * `Calculation = Active Days / Calendar Span Days (from first CheckIn to last CheckOut)`
+      * `Calculation = Active Days / Adjusted Calendar Span Days`.
+      *(Note: Full empty days (gaps ≥ 24h) between lots are automatically deducted to ensure fair analysis when filtering specific programs.)*
     * **P (Performance):** Measures if the tester is running at theoretical speed when active.
       * `Theoretical UPH = Theoretical Max UPD / 24`
       * `Actual UPH = Total TestQty / Total Active Hours`
       * `Calculation = Actual UPH / Theoretical UPH`
-    * **Q (Quality):** Testing quality. Includes both First Yield and Final Yield.
+    * **Q (Quality):** Testing quality. Includes both First Yield and Final Yield (Weighted Average).
       * `First Yield = Total First Pass Qty / Total TestQty`
       * `Final Yield = Total Final Pass Qty / Total TestQty`
     * **Overall OEE:**
@@ -268,6 +269,13 @@ if filtered_df.empty:
 
 filtered_df['Duration_Hr'] = (filtered_df['CheckOutTime'] - filtered_df['CheckInTime']).dt.total_seconds() / 3600.0
 
+# 🌟 V39 新增：計算 Empty Days
+df_sorted = filtered_df.sort_values(by=['Tester', 'OpNo', 'CheckInTime']).copy()
+df_sorted['Next_CheckIn'] = df_sorted.groupby(['Tester', 'OpNo'])['CheckInTime'].shift(-1)
+df_sorted['Gap_Days'] = (df_sorted['Next_CheckIn'] - df_sorted['CheckOutTime']).dt.total_seconds() / 86400.0
+df_sorted['Empty_Days'] = np.where(df_sorted['Gap_Days'] >= 1.0, np.floor(df_sorted['Gap_Days']), 0)
+empty_span = df_sorted.groupby(['Tester', 'OpNo'])['Empty_Days'].sum().reset_index()
+
 tester_summary = filtered_df.groupby(['Tester', 'OpNo']).agg(
     Lot_Count=('LotNo', 'nunique'),
     Total_TestQty=('TestQty', 'sum'),
@@ -278,12 +286,18 @@ tester_summary = filtered_df.groupby(['Tester', 'OpNo']).agg(
     Max_CheckOut=('CheckOutTime', 'max')
 ).reset_index()
 
+# 🌟 V39 新增：合併 Empty Days 並計算 Adjusted Calendar Span
+tester_summary = tester_summary.merge(empty_span, on=['Tester', 'OpNo'], how='left')
+tester_summary['Empty_Days'] = tester_summary['Empty_Days'].fillna(0)
+
 tester_summary['Active_Days'] = tester_summary['Total_Duration_Hr'] / 24.0
 tester_summary['Avg_Gross_UPD'] = np.where(tester_summary['Active_Days'] > 0, tester_summary['Total_TestQty'] / tester_summary['Active_Days'], 0)
 tester_summary['Avg_Net_UPD'] = np.where(tester_summary['Active_Days'] > 0, tester_summary['Total_PassQty'] / tester_summary['Active_Days'], 0)
 
-tester_summary['Calendar_Span_Days'] = (tester_summary['Max_CheckOut'] - tester_summary['Min_CheckIn']).dt.total_seconds() / (24.0 * 3600.0)
-tester_summary['Availability (A)'] = np.where(tester_summary['Calendar_Span_Days'] > 0, tester_summary['Active_Days'] / tester_summary['Calendar_Span_Days'], 0)
+tester_summary['Raw_Calendar_Days'] = (tester_summary['Max_CheckOut'] - tester_summary['Min_CheckIn']).dt.total_seconds() / 86400.0
+tester_summary['Adjusted_Span_Days'] = np.maximum(tester_summary['Raw_Calendar_Days'] - tester_summary['Empty_Days'], tester_summary['Active_Days'])
+
+tester_summary['Availability (A)'] = np.where(tester_summary['Adjusted_Span_Days'] > 0, tester_summary['Active_Days'] / tester_summary['Adjusted_Span_Days'], 0)
 
 tester_summary['Theo_Max_UPD'] = tester_summary['OpNo'].map(lambda x: targets[x]['theo'])
 tester_summary['Planned_UPD'] = tester_summary['OpNo'].map(lambda x: targets[x]['plan'])
@@ -330,7 +344,6 @@ for idx, op in enumerate(selected_ops):
         c1, c2, c3, c4 = st.columns(4)
         with c1: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Total Insertions (Gross)</div><div class='kpi-value'>{total_insertions:,}</div></div>", unsafe_allow_html=True)
         with c2: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Pass Insertions (Net)</div><div class='kpi-value'>{total_pass_insertions:,}</div></div>", unsafe_allow_html=True)
-        # 🌟 修正名稱為 Avg Final Yield
         with c3: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Avg Final Yield</div><div class='kpi-value'>{avg_step_yield:.2f}%</div></div>", unsafe_allow_html=True)
         with c4: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Active Testers</div><div class='kpi-value'>{active_testers}</div></div>", unsafe_allow_html=True)
 
@@ -347,7 +360,8 @@ for idx, op in enumerate(selected_ops):
         global_net_upd = (total_pass_insertions / total_op_days) if total_op_days > 0 else 0
         
         op_theo_val = targets[op]['theo']
-        total_calendar_days = op_summary['Calendar_Span_Days'].sum()
+        # 🌟 V39：全域 OEE 計算也使用扣除 Empty Days 後的總跨度
+        total_calendar_days = op_summary['Adjusted_Span_Days'].sum()
         global_theo_qty = total_calendar_days * op_theo_val
         global_oee = (total_insertions / global_theo_qty) * 100 if global_theo_qty > 0 else 0
 
@@ -391,18 +405,20 @@ for idx, op in enumerate(selected_ops):
         # Part D: Tester Performance Details
         # ---------------------------------------------------------
         st.markdown("#### 3. Tester Performance Details (A/P/Q Breakdown)")
+        st.caption("💡 Tip: 'Empty Days' (gaps ≥ 24h between lots) are deducted from Calendar Span for a fair Availability evaluation.")
         
+        # 🌟 V39 新增：加入 Empty_Days 欄位
         display_df = op_summary[[
             'Tester', 'Lot_Count', 'First_Yield', 'Final_Yield (Q)', 
             'Avg_Gross_UPD', 'Avg_Net_UPD', 'Avg_OEE',
-            'Active_Days', 'Availability (A)', 'Performance (P)'
+            'Active_Days', 'Availability (A)', 'Empty_Days', 'Performance (P)'
         ]].copy()
 
         display_df = display_df.rename(columns={
             'Tester': 'Tester', 'Lot_Count': 'Lot Count', 
             'First_Yield': 'First Yield', 'Final_Yield (Q)': 'Final Yield (Q)',
             'Avg_Gross_UPD': 'Avg UPD (TestQty)', 'Avg_Net_UPD': 'Avg UPD (PassQty)', 'Avg_OEE': 'Avg OEE',
-            'Active_Days': 'Active Days', 'Availability (A)': 'Availability (A)', 'Performance (P)': 'Performance (P)'
+            'Active_Days': 'Active Days', 'Availability (A)': 'Availability (A)', 'Empty_Days': 'Empty Days', 'Performance (P)': 'Performance (P)'
         })
 
         display_df['First Yield'] = display_df['First Yield'].apply(lambda x: f"{x*100:.2f}%")
@@ -412,6 +428,7 @@ for idx, op in enumerate(selected_ops):
         display_df['Avg OEE'] = display_df['Avg OEE'].apply(lambda x: f"{x*100:.1f}%")
         display_df['Active Days'] = display_df['Active Days'].apply(lambda x: f"{x:.2f}")
         display_df['Availability (A)'] = display_df['Availability (A)'].apply(lambda x: f"{x*100:.1f}%")
+        display_df['Empty Days'] = display_df['Empty Days'].apply(lambda x: f"{x:.2f}") # 格式化 Empty Days
         display_df['Performance (P)'] = display_df['Performance (P)'].apply(lambda x: f"{x*100:.1f}%")
 
         def highlight_low_oee(val, threshold):
