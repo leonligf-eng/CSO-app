@@ -96,13 +96,16 @@ def generate_mock_data():
         elif op == "FTA": qty = np.random.randint(5000, 8000)
         else: qty = np.random.randint(15000, 25000)
         
-        yield_rate = np.random.uniform(0.95, 0.99)
-        pass_qty = int(qty * yield_rate)
+        first_yield_rate = np.random.uniform(0.85, 0.95)
+        final_yield_rate = np.random.uniform(first_yield_rate, 0.99)
         
-        data.append([f"LOT_{i:04d}", prod, op, prog, tester, start_time, end_time, qty, pass_qty])
+        first_pass_qty = int(qty * first_yield_rate)
+        pass_qty = int(qty * final_yield_rate)
+        
+        data.append([f"LOT_{i:04d}", prod, op, prog, tester, start_time, end_time, qty, first_pass_qty, pass_qty])
         tester_clocks[tester] = end_time
         
-    return pd.DataFrame(data, columns=['LotNo', 'ProductNo', 'OpNo', 'ProgramName', 'Tester', 'CheckInTime', 'CheckOutTime', 'TestQty', 'PassQty'])
+    return pd.DataFrame(data, columns=['LotNo', 'ProductNo', 'OpNo', 'ProgramName', 'Tester', 'CheckInTime', 'CheckOutTime', 'TestQty', 'First Pass Qty', 'PassQty'])
 
 def load_data(file):
     if file is not None:
@@ -113,6 +116,12 @@ def load_data(file):
             df['CheckOutTime'] = pd.to_datetime(df['CheckOutTime'], errors='coerce')
             df['TestQty'] = pd.to_numeric(df['TestQty'], errors='coerce').fillna(0)
             df['PassQty'] = pd.to_numeric(df['PassQty'], errors='coerce').fillna(0)
+            
+            if 'First Pass Qty' in df.columns:
+                 df['First Pass Qty'] = pd.to_numeric(df['First Pass Qty'], errors='coerce').fillna(df['PassQty'])
+            else:
+                 df['First Pass Qty'] = df['PassQty']
+                 
             if 'ProductNo' not in df.columns:
                 df['ProductNo'] = "Unknown_Product"
             return df
@@ -128,7 +137,6 @@ if raw_df is None or raw_df.empty:
     st.warning("No data available.")
     st.stop()
 
-# 🌟 補回全域極端值 (防呆用，提供時間選擇器的絕對上下限)
 global_min_date = raw_df['CheckInTime'].min().date() if pd.notnull(raw_df['CheckInTime'].min()) else datetime.now().date()
 global_max_date = raw_df['CheckOutTime'].max().date() if pd.notnull(raw_df['CheckOutTime'].max()) else datetime.now().date()
 
@@ -141,7 +149,6 @@ with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
 
     #### 1. Capacity Metrics (Tester View vs. Product View)
     * **Total Insertions (Gross):** Total testing actions performed by the testers across all operations. It evaluates the physical workload on the testers (allows double-counting across ops).
-    * **Est. Physical Units:** Estimated actual ICs processed, calculated by de-duplicating `LotNo` and taking the max input quantity across operations.
     * **Active Days:** The exact number of hours a tester spent in the "Testing" state (CheckIn to CheckOut), divided by 24 hours.
     * **Gross UPD (Prorated 24h Rate):** Calculated as `Total TestQty / Active Days`. 
       * *Note on Proration:* This is a **SPEED metric**, not a volume metric. If a tester tests 6,000 units in exactly 12 hours, its 24-hour prorated UPD is 12,000 ea/day.
@@ -154,8 +161,9 @@ with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
       * `Theoretical UPH = Theoretical Max UPD / 24`
       * `Actual UPH = Total TestQty / Total Active Hours`
       * `Calculation = Actual UPH / Theoretical UPH`
-    * **Q (Quality):** Testing quality.
-      * `Calculation = Total PassQty / Total TestQty`
+    * **Q (Quality):** Testing quality. Includes both First Yield and Final Yield.
+      * `First Yield = Total First Pass Qty / Total TestQty`
+      * `Final Yield = Total Final Pass Qty / Total TestQty`
     * **Overall OEE:**
       * `Calculation = Availability (A) × Performance (P)`
 
@@ -168,12 +176,10 @@ st.markdown("### 🔍 Data Filters")
 
 filter_col1, filter_col2 = st.columns([1, 1])
 
-# 👉 1. 生成 OpNo 選單
 with filter_col1:
     op_options = sorted(raw_df['OpNo'].dropna().unique().tolist())
     selected_ops = st.multiselect("Select Operation (OpNo)", options=op_options, key="op_select")
 
-# 👉 2. 生成 ProgramName 選單 (連動 OpNo)
 filtered_by_op = raw_df[raw_df['OpNo'].isin(selected_ops)] if selected_ops else raw_df
 prog_options = sorted(filtered_by_op['ProgramName'].dropna().unique().tolist())
 
@@ -184,8 +190,6 @@ valid_defaults_prog = [p for p in st.session_state.saved_progs if p in prog_opti
 with filter_col2:
     selected_progs = st.multiselect("Select Program", options=prog_options, default=valid_defaults_prog, key="prog_select_widget", on_change=update_progs)
 
-
-# 🌟 補回動態時間軸邏輯：根據已選的 OpNo + ProgramName，動態計算該組合下真實的資料區間
 filtered_by_op_prog = filtered_by_op[filtered_by_op['ProgramName'].isin(selected_progs)] if selected_progs else filtered_by_op
 
 if not filtered_by_op_prog.empty:
@@ -194,10 +198,8 @@ if not filtered_by_op_prog.empty:
 else:
     curr_min_date, curr_max_date = global_min_date, global_max_date
 
-
 filter_col3, filter_col4 = st.columns([1, 1])
 
-# 👉 3. 選擇時間區間 (預設值自動收斂到 curr_min_date 與 curr_max_date)
 with filter_col3:
     date_range = st.date_input(
         "Select Date Range (CheckIn/Out Overlap)", 
@@ -210,14 +212,12 @@ with filter_col3:
     else:
         start_date = end_date = date_range[0] if isinstance(date_range, (list, tuple)) else date_range
 
-# 👉 3.5 系統拿 (OpNo + ProgramName + 時間) 去砍資料
 mask_stage_3 = (
     (filtered_by_op_prog['CheckInTime'].dt.date <= end_date) & 
     (filtered_by_op_prog['CheckOutTime'].dt.date >= start_date)
 )
 filtered_by_op_prog_date = filtered_by_op_prog[mask_stage_3]
 
-# 👉 4. 生成 ProductNo 選單 (只顯示該時間段 + 該站點 + 該程式有跑的產品)
 prod_options = sorted(filtered_by_op_prog_date['ProductNo'].dropna().unique().tolist())
 
 if 'saved_prods' not in st.session_state: st.session_state.saved_prods = []
@@ -255,7 +255,6 @@ if not selected_ops or not selected_progs or not selected_prods:
 # ==============================================================================
 # --- 3. Data Processing Engine ---
 # ==============================================================================
-# 最後把 ProductNo 與 Min Lot Size 也加入過濾，產生最終分析資料集
 mask_final = (
     filtered_by_op_prog_date['ProductNo'].isin(selected_prods) &
     (filtered_by_op_prog_date['TestQty'] >= min_lot_size)
@@ -272,6 +271,7 @@ filtered_df['Duration_Hr'] = (filtered_df['CheckOutTime'] - filtered_df['CheckIn
 tester_summary = filtered_df.groupby(['Tester', 'OpNo']).agg(
     Lot_Count=('LotNo', 'nunique'),
     Total_TestQty=('TestQty', 'sum'),
+    Total_FirstPassQty=('First Pass Qty', 'sum'),
     Total_PassQty=('PassQty', 'sum'),
     Total_Duration_Hr=('Duration_Hr', 'sum'),
     Min_CheckIn=('CheckInTime', 'min'),
@@ -291,7 +291,9 @@ tester_summary['Planned_UPD'] = tester_summary['OpNo'].map(lambda x: targets[x][
 tester_summary['Actual_UPH'] = np.where(tester_summary['Total_Duration_Hr'] > 0, tester_summary['Total_TestQty'] / tester_summary['Total_Duration_Hr'], 0)
 tester_summary['Performance (P)'] = tester_summary['Actual_UPH'] / (tester_summary['Theo_Max_UPD'] / 24.0)
 
-tester_summary['Yield (Q)'] = np.where(tester_summary['Total_TestQty'] > 0, tester_summary['Total_PassQty'] / tester_summary['Total_TestQty'], 0)
+tester_summary['First_Yield'] = np.where(tester_summary['Total_TestQty'] > 0, tester_summary['Total_FirstPassQty'] / tester_summary['Total_TestQty'], 0)
+tester_summary['Final_Yield (Q)'] = np.where(tester_summary['Total_TestQty'] > 0, tester_summary['Total_PassQty'] / tester_summary['Total_TestQty'], 0)
+
 tester_summary['Avg_OEE'] = tester_summary['Availability (A)'] * tester_summary['Performance (P)']
 
 tester_summary = tester_summary.sort_values(by=['OpNo', 'Tester'], ascending=True)
@@ -328,7 +330,8 @@ for idx, op in enumerate(selected_ops):
         c1, c2, c3, c4 = st.columns(4)
         with c1: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Total Insertions (Gross)</div><div class='kpi-value'>{total_insertions:,}</div></div>", unsafe_allow_html=True)
         with c2: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Pass Insertions (Net)</div><div class='kpi-value'>{total_pass_insertions:,}</div></div>", unsafe_allow_html=True)
-        with c3: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Avg Step Yield</div><div class='kpi-value'>{avg_step_yield:.2f}%</div></div>", unsafe_allow_html=True)
+        # 🌟 修正名稱為 Avg Final Yield
+        with c3: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Avg Final Yield</div><div class='kpi-value'>{avg_step_yield:.2f}%</div></div>", unsafe_allow_html=True)
         with c4: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Active Testers</div><div class='kpi-value'>{active_testers}</div></div>", unsafe_allow_html=True)
 
         st.divider()
@@ -390,18 +393,20 @@ for idx, op in enumerate(selected_ops):
         st.markdown("#### 3. Tester Performance Details (A/P/Q Breakdown)")
         
         display_df = op_summary[[
-            'Tester', 'Lot_Count', 'Yield (Q)', 
+            'Tester', 'Lot_Count', 'First_Yield', 'Final_Yield (Q)', 
             'Avg_Gross_UPD', 'Avg_Net_UPD', 'Avg_OEE',
             'Active_Days', 'Availability (A)', 'Performance (P)'
         ]].copy()
 
         display_df = display_df.rename(columns={
-            'Tester': 'Tester', 'Lot_Count': 'Lot Count', 'Yield (Q)': 'Yield (Q)',
+            'Tester': 'Tester', 'Lot_Count': 'Lot Count', 
+            'First_Yield': 'First Yield', 'Final_Yield (Q)': 'Final Yield (Q)',
             'Avg_Gross_UPD': 'Avg Rate (TestQty)', 'Avg_Net_UPD': 'Avg Rate (PassQty)', 'Avg_OEE': 'Avg OEE',
             'Active_Days': 'Active Days', 'Availability (A)': 'Availability (A)', 'Performance (P)': 'Performance (P)'
         })
 
-        display_df['Yield (Q)'] = display_df['Yield (Q)'].apply(lambda x: f"{x*100:.2f}%")
+        display_df['First Yield'] = display_df['First Yield'].apply(lambda x: f"{x*100:.2f}%")
+        display_df['Final Yield (Q)'] = display_df['Final Yield (Q)'].apply(lambda x: f"{x*100:.2f}%")
         display_df['Avg Rate (TestQty)'] = display_df['Avg Rate (TestQty)'].apply(lambda x: f"{x:,.0f}")
         display_df['Avg Rate (PassQty)'] = display_df['Avg Rate (PassQty)'].apply(lambda x: f"{x:,.0f}")
         display_df['Avg OEE'] = display_df['Avg OEE'].apply(lambda x: f"{x*100:.1f}%")
@@ -422,12 +427,11 @@ for idx, op in enumerate(selected_ops):
 
         st.write("")
 
-       # ---------------------------------------------------------
-        # Part E: Visualizations (🌟 V32 修正：改為上下滿版排列)
+        # ---------------------------------------------------------
+        # Part E: Visualizations
         # ---------------------------------------------------------
         st.markdown("#### 4. Visualizations")
         
-        # --- 圖表 1：吞吐量與目標比較 (Throughput Comparison) ---
         fig1 = px.bar(
             op_summary, 
             x='Tester', 
@@ -437,22 +441,19 @@ for idx, op in enumerate(selected_ops):
             labels={'value': 'Prorated Rate (UPD)', 'variable': 'Metrics', 'Tester': ''},
             color_discrete_map={'Avg_Gross_UPD': '#1E3A8A', 'Avg_Net_UPD': '#28a745'}
         )
-        # 加上基準線
         fig1.add_hline(y=op_plan_val, line_dash="dash", line_color="orange", annotation_text="Planned Target", annotation_position="top right")
         fig1.add_hline(y=op_theo_val, line_dash="dot", line_color="red", annotation_text="Theoretical Max", annotation_position="top right")
         
-        # 佈局優化：因為版面變寬了，圖例可以放回右上方，保持乾淨
         fig1.update_layout(
             legend_title_text='', 
             margin=dict(t=50, b=20, l=10, r=10), 
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            height=400 # 設定固定高度讓視覺統一
+            height=400 
         )
         st.plotly_chart(fig1, use_container_width=True)
         
-        st.write("") # 加上一點間距
+        st.write("") 
         
-        # --- 圖表 2：產品組合分佈 (Product Mix) ---
         prod_summary = op_df.groupby(['Tester', 'ProductNo'])['TestQty'].sum().reset_index()
         fig2 = px.bar(
             prod_summary, 
@@ -464,14 +465,16 @@ for idx, op in enumerate(selected_ops):
             color_discrete_sequence=px.colors.qualitative.Pastel
         )
         
+        fig2.update_xaxes(categoryorder='category ascending')
+        
         fig2.update_layout(
             margin=dict(t=50, b=20, l=10, r=10), 
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            height=400 # 設定固定高度讓視覺統一
+            height=400 
         )
         st.plotly_chart(fig2, use_container_width=True)
         
-        st.write("") # 為了與下方的 Raw Data 保持距離
+        st.write("") 
 
         # ---------------------------------------------------------
         # Part F: Raw Data
