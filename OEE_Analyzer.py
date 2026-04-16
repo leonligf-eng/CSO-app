@@ -61,6 +61,14 @@ st.markdown("""
         border-right: 1px solid #dee2e6 !important;
         box-shadow: 0 -3px 6px rgba(0,0,0,0.04);
     }
+    
+    /* 🌟 強制 Streamlit Dataframe 內容與表頭置中 */
+    [data-testid="stDataFrame"] th {
+        text-align: center !important;
+    }
+    [data-testid="stDataFrame"] td {
+        text-align: center !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -397,32 +405,32 @@ for idx, op in enumerate(selected_ops):
         st.write("")
 
         # ---------------------------------------------------------
-        # Part D: Tester Performance Details
+        # Part D: Tester Performance Details (🌟 V43: 排序與置中微調)
         # ---------------------------------------------------------
         st.markdown("#### 3. Tester Performance Details (A/P/Q Breakdown)")
         
+        # 🌟 依照指定順序提取欄位
         display_df = op_summary[[
             'Tester', 'Lot_Count', 'First_Yield', 'Final_Yield (Q)', 
-            'Total_TestQty', 'Avg_Gross_UPD', 'Total_PassQty', 'Avg_Net_UPD', 'Avg_OEE',
+            'Avg_Gross_UPD', 'Avg_Net_UPD', 'Total_TestQty', 'Total_PassQty', 'Avg_OEE',
             'Active_Days', 'Availability (A)', 'Performance (P)'
         ]].copy()
 
-        # 🌟 V42: 變更為 Normalized UPD
         display_df = display_df.rename(columns={
             'Tester': 'Tester', 'Lot_Count': 'Lot Count', 
             'First_Yield': 'First Yield', 'Final_Yield (Q)': 'Final Yield (Q)',
-            'Total_TestQty': 'Actual Test Qty', 'Avg_Gross_UPD': 'Normalized UPD (Test)', 
-            'Total_PassQty': 'Actual Pass Qty', 'Avg_Net_UPD': 'Normalized UPD (Pass)', 
+            'Avg_Gross_UPD': 'Normalized UPD (Test)', 'Avg_Net_UPD': 'Normalized UPD (Pass)', 
+            'Total_TestQty': 'Actual Test Qty', 'Total_PassQty': 'Actual Pass Qty', 
             'Avg_OEE': 'Avg OEE',
             'Active_Days': 'Active Days', 'Availability (A)': 'Availability (A)', 'Performance (P)': 'Performance (P)'
         })
 
         display_df['First Yield'] = display_df['First Yield'].apply(lambda x: f"{x*100:.2f}%")
         display_df['Final Yield (Q)'] = display_df['Final Yield (Q)'].apply(lambda x: f"{x*100:.2f}%")
-        display_df['Actual Test Qty'] = display_df['Actual Test Qty'].apply(lambda x: f"{x:,.0f}")
         display_df['Normalized UPD (Test)'] = display_df['Normalized UPD (Test)'].apply(lambda x: f"{x:,.0f}")
-        display_df['Actual Pass Qty'] = display_df['Actual Pass Qty'].apply(lambda x: f"{x:,.0f}")
         display_df['Normalized UPD (Pass)'] = display_df['Normalized UPD (Pass)'].apply(lambda x: f"{x:,.0f}")
+        display_df['Actual Test Qty'] = display_df['Actual Test Qty'].apply(lambda x: f"{x:,.0f}")
+        display_df['Actual Pass Qty'] = display_df['Actual Pass Qty'].apply(lambda x: f"{x:,.0f}")
         display_df['Avg OEE'] = display_df['Avg OEE'].apply(lambda x: f"{x*100:.1f}%")
         display_df['Active Days'] = display_df['Active Days'].apply(lambda x: f"{x:.2f}")
         display_df['Availability (A)'] = display_df['Availability (A)'].apply(lambda x: f"{x*100:.1f}%")
@@ -436,12 +444,14 @@ for idx, op in enumerate(selected_ops):
             except: pass
             return ''
         
-        # 🌟 維持弱化 Normalized UPD 顯示
+        # 🌟 取消顏色弱化，並設定 Pandas Styler 置中對齊
         styled_df = display_df.style\
             .map(lambda x: highlight_low_oee(x, implied_oee), subset=['Avg OEE'])\
-            .map(lambda _: 'color: #888888; font-size: 0.9em;', subset=['Normalized UPD (Test)', 'Normalized UPD (Pass)'])\
             .set_properties(**{'text-align': 'center'})\
-            .set_table_styles([{'selector': 'th', 'props': [('text-align', 'center')]}])
+            .set_table_styles([
+                {'selector': 'th', 'props': [('text-align', 'center')]},
+                {'selector': 'td', 'props': [('text-align', 'center')]}
+            ])
             
         st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
@@ -452,7 +462,6 @@ for idx, op in enumerate(selected_ops):
         # ---------------------------------------------------------
         st.markdown("#### 4. Visualizations")
         
-        # 🌟 同步更新視覺化標籤
         plot_df = op_summary.rename(columns={'Avg_Gross_UPD': 'Normalized UPD (Test)', 'Avg_Net_UPD': 'Normalized UPD (Pass)'})
         
         fig1 = px.bar(
@@ -504,4 +513,4 @@ for idx, op in enumerate(selected_ops):
         # ---------------------------------------------------------
         st.markdown("#### 5. Raw Data")
         with st.expander(f"Click to view raw data for {op}"):
-            st.dataframe(op_df, use_container_width=True, hide_index=True)#41: ㄍ
+            st.dataframe(op_df, use_container_width=True, hide_index=True)
