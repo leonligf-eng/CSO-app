@@ -148,11 +148,9 @@ with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
     This system employs rigorous Industrial Engineering (IE) logic combined with actual production report data to calculate authentic equipment efficiency. Metric definitions are as follows:
 
     #### 1. Capacity Metrics (Tester View vs. Product View)
-    * **Total Insertions (Gross):** Total testing actions performed by the testers across all operations. It evaluates the physical workload on the testers (allows double-counting across ops).
+    * **Test Qty:** Total testing actions performed by the testers across all operations.
     * **Active Days:** The exact number of hours a tester spent in the "Testing" state (CheckIn to CheckOut), divided by 24 hours.
-    * **Gross UPD (Prorated 24h Rate):** Calculated as `Total TestQty / Active Days`. 
-      * *Note on Proration:* This is a **SPEED metric**, not a volume metric. If a tester tests 6,000 units in exactly 12 hours, its 24-hour prorated UPD is 12,000 ea/day.
-    * **Global Average UPD (Weighted):** To prevent short-duration outliers from skewing the factory average, the overall operation average is calculated as `Sum of All TestQty / Sum of All Active Days`.
+    * **Avg Test UPD:** Calculated as `Total Test Qty / Active Days`. 
 
     #### 2. OEE Breakdown (Availability, Performance, Quality)
     * **A (Availability):** Measures how often the tester is actually in production.
@@ -160,17 +158,17 @@ with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
       *(Note: Full empty days (gaps ≥ 24h) between lots are automatically deducted to ensure fair analysis when filtering specific programs.)*
     * **P (Performance):** Measures if the tester is running at theoretical speed when active.
       * `Theoretical UPH = Theoretical Max UPD / 24`
-      * `Actual UPH = Total TestQty / Total Active Hours`
+      * `Actual UPH = Total Test Qty / Total Active Hours`
       * `Calculation = Actual UPH / Theoretical UPH`
-    * **Q (Quality):** Testing quality. Includes both First Yield and Final Yield (Weighted Average).
-      * `First Yield = Total First Pass Qty / Total TestQty`
-      * `Final Yield = Total Final Pass Qty / Total TestQty`
+    * **Q (Quality):** Testing quality. Includes both First Yield and Final Yield.
+      * `First Yield = Total First Pass Qty / Total Test Qty`
+      * `Final Yield = Total Final Pass Qty / Total Test Qty`
     * **Overall OEE:**
       * `Calculation = Availability (A) × Performance (P)`
 
     #### 3. Capacity Planning Metrics
-    * **Planned Target UPD:** The safety scheduling baseline preset by Planning or Engineering, defined specifically per operation.
-    * **Implied OEE:** `Calculation = Planned Target UPD / Theoretical Max UPD`. Reflects the built-in buffer percentage reserved for setups, maintenance, and re-tests for a specific operation.
+    * **Planned Target UPD:** The safety scheduling baseline preset by Planning or Engineering.
+    * **Implied OEE:** `Calculation = Planned Target UPD / Theoretical Max UPD`. Reflects the built-in buffer percentage reserved for setups, maintenance, and re-tests.
     """)
 
 st.markdown("### 🔍 Data Filters")
@@ -269,7 +267,7 @@ if filtered_df.empty:
 
 filtered_df['Duration_Hr'] = (filtered_df['CheckOutTime'] - filtered_df['CheckInTime']).dt.total_seconds() / 3600.0
 
-# 🌟 V39 新增：計算 Empty Days
+# Empty Days 計算保留 (用於 Availability 精準計算)
 df_sorted = filtered_df.sort_values(by=['Tester', 'OpNo', 'CheckInTime']).copy()
 df_sorted['Next_CheckIn'] = df_sorted.groupby(['Tester', 'OpNo'])['CheckInTime'].shift(-1)
 df_sorted['Gap_Days'] = (df_sorted['Next_CheckIn'] - df_sorted['CheckOutTime']).dt.total_seconds() / 86400.0
@@ -286,7 +284,6 @@ tester_summary = filtered_df.groupby(['Tester', 'OpNo']).agg(
     Max_CheckOut=('CheckOutTime', 'max')
 ).reset_index()
 
-# 🌟 V39 新增：合併 Empty Days 並計算 Adjusted Calendar Span
 tester_summary = tester_summary.merge(empty_span, on=['Tester', 'OpNo'], how='left')
 tester_summary['Empty_Days'] = tester_summary['Empty_Days'].fillna(0)
 
@@ -342,8 +339,8 @@ for idx, op in enumerate(selected_ops):
         active_testers = op_summary['Tester'].nunique()
 
         c1, c2, c3, c4 = st.columns(4)
-        with c1: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Total Insertions (Gross)</div><div class='kpi-value'>{total_insertions:,}</div></div>", unsafe_allow_html=True)
-        with c2: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Pass Insertions (Net)</div><div class='kpi-value'>{total_pass_insertions:,}</div></div>", unsafe_allow_html=True)
+        with c1: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Test Qty</div><div class='kpi-value'>{total_insertions:,}</div></div>", unsafe_allow_html=True)
+        with c2: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Pass Qty</div><div class='kpi-value'>{total_pass_insertions:,}</div></div>", unsafe_allow_html=True)
         with c3: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Avg Final Yield</div><div class='kpi-value'>{avg_step_yield:.2f}%</div></div>", unsafe_allow_html=True)
         with c4: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Active Testers</div><div class='kpi-value'>{active_testers}</div></div>", unsafe_allow_html=True)
 
@@ -360,14 +357,13 @@ for idx, op in enumerate(selected_ops):
         global_net_upd = (total_pass_insertions / total_op_days) if total_op_days > 0 else 0
         
         op_theo_val = targets[op]['theo']
-        # 🌟 V39：全域 OEE 計算也使用扣除 Empty Days 後的總跨度
         total_calendar_days = op_summary['Adjusted_Span_Days'].sum()
         global_theo_qty = total_calendar_days * op_theo_val
         global_oee = (total_insertions / global_theo_qty) * 100 if global_theo_qty > 0 else 0
 
         sc1, sc2, sc3 = st.columns(3)
-        with sc1: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Actual UPD (Gross UPD)</div><div class='summary-value'>{global_gross_upd:,.0f}</div></div>", unsafe_allow_html=True)
-        with sc2: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Effective UPD (Net UPD)</div><div class='summary-value'>{global_net_upd:,.0f}</div></div>", unsafe_allow_html=True)
+        with sc1: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Test UPD</div><div class='summary-value'>{global_gross_upd:,.0f}</div></div>", unsafe_allow_html=True)
+        with sc2: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Pass UPD</div><div class='summary-value'>{global_net_upd:,.0f}</div></div>", unsafe_allow_html=True)
         with sc3: st.markdown(f"<div class='summary-card'><div class='summary-title'>Overall OEE</div><div class='summary-value'>{global_oee:.1f}%</div></div>", unsafe_allow_html=True)
 
         st.write("") 
@@ -394,7 +390,7 @@ for idx, op in enumerate(selected_ops):
         st.markdown(f"<div class='insight-box'>{insight_text}</div>", unsafe_allow_html=True)
 
         insight_data = {
-            "Metric": ["Report Avg UPD (Gross)", "Planned Target UPD", "Theoretical Max UPD", f"Implied OEE (at {op_plan_val})"],
+            "Metric": ["Report Avg UPD (Actual)", "Planned Target UPD", "Theoretical Max UPD", f"Implied OEE (at {op_plan_val})"],
             "Value": [f"{global_gross_upd:,.0f}", f"{op_plan_val:,.0f}", f"{op_theo_val:,.0f}", f"{implied_oee:.1f}%"]
         }
         st.dataframe(pd.DataFrame(insight_data).T, use_container_width=True, hide_index=True)
@@ -405,30 +401,28 @@ for idx, op in enumerate(selected_ops):
         # Part D: Tester Performance Details
         # ---------------------------------------------------------
         st.markdown("#### 3. Tester Performance Details (A/P/Q Breakdown)")
-        st.caption("💡 Tip: 'Empty Days' (gaps ≥ 24h between lots) are deducted from Calendar Span for a fair Availability evaluation.")
         
-        # 🌟 V39 新增：加入 Empty_Days 欄位
+        # 🌟 移除 Empty_Days 顯示
         display_df = op_summary[[
             'Tester', 'Lot_Count', 'First_Yield', 'Final_Yield (Q)', 
             'Avg_Gross_UPD', 'Avg_Net_UPD', 'Avg_OEE',
-            'Active_Days', 'Availability (A)', 'Empty_Days', 'Performance (P)'
+            'Active_Days', 'Availability (A)', 'Performance (P)'
         ]].copy()
 
         display_df = display_df.rename(columns={
             'Tester': 'Tester', 'Lot_Count': 'Lot Count', 
             'First_Yield': 'First Yield', 'Final_Yield (Q)': 'Final Yield (Q)',
-            'Avg_Gross_UPD': 'Avg UPD (TestQty)', 'Avg_Net_UPD': 'Avg UPD (PassQty)', 'Avg_OEE': 'Avg OEE',
-            'Active_Days': 'Active Days', 'Availability (A)': 'Availability (A)', 'Empty_Days': 'Empty Days', 'Performance (P)': 'Performance (P)'
+            'Avg_Gross_UPD': 'Avg TestQty UPD', 'Avg_Net_UPD': 'Avg PassQty UPD', 'Avg_OEE': 'Avg OEE',
+            'Active_Days': 'Active Days', 'Availability (A)': 'Availability (A)', 'Performance (P)': 'Performance (P)'
         })
 
         display_df['First Yield'] = display_df['First Yield'].apply(lambda x: f"{x*100:.2f}%")
         display_df['Final Yield (Q)'] = display_df['Final Yield (Q)'].apply(lambda x: f"{x*100:.2f}%")
-        display_df['Avg UPD (TestQty)'] = display_df['Avg UPD (TestQty)'].apply(lambda x: f"{x:,.0f}")
-        display_df['Avg UPD (PassQty)'] = display_df['Avg UPD (PassQty)'].apply(lambda x: f"{x:,.0f}")
+        display_df['Avg TestQty UPD'] = display_df['Avg TestQty UPD'].apply(lambda x: f"{x:,.0f}")
+        display_df['Avg PassQty UPD'] = display_df['Avg PassQty UPD'].apply(lambda x: f"{x:,.0f}")
         display_df['Avg OEE'] = display_df['Avg OEE'].apply(lambda x: f"{x*100:.1f}%")
         display_df['Active Days'] = display_df['Active Days'].apply(lambda x: f"{x:.2f}")
         display_df['Availability (A)'] = display_df['Availability (A)'].apply(lambda x: f"{x*100:.1f}%")
-        display_df['Empty Days'] = display_df['Empty Days'].apply(lambda x: f"{x:.2f}") # 格式化 Empty Days
         display_df['Performance (P)'] = display_df['Performance (P)'].apply(lambda x: f"{x*100:.1f}%")
 
         def highlight_low_oee(val, threshold):
@@ -439,7 +433,12 @@ for idx, op in enumerate(selected_ops):
             except: pass
             return ''
         
-        styled_df = display_df.style.map(lambda x: highlight_low_oee(x, implied_oee), subset=['Avg OEE'])
+        # 🌟 強制設定 Header 與 Content 置中
+        styled_df = display_df.style\
+            .map(lambda x: highlight_low_oee(x, implied_oee), subset=['Avg OEE'])\
+            .set_properties(**{'text-align': 'center'})\
+            .set_table_styles([{'selector': 'th', 'props': [('text-align', 'center')]}])
+            
         st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
         st.write("")
@@ -449,14 +448,17 @@ for idx, op in enumerate(selected_ops):
         # ---------------------------------------------------------
         st.markdown("#### 4. Visualizations")
         
+        # 同步圖表上的名詞標籤
+        plot_df = op_summary.rename(columns={'Avg_Gross_UPD': 'Avg Test UPD', 'Avg_Net_UPD': 'Avg Pass UPD'})
+        
         fig1 = px.bar(
-            op_summary, 
+            plot_df, 
             x='Tester', 
-            y=['Avg_Gross_UPD', 'Avg_Net_UPD'], 
+            y=['Avg Test UPD', 'Avg Pass UPD'], 
             barmode='group',
             title=f"Throughput Comparison & Target Validation ({op})",
             labels={'value': 'Prorated UPD', 'variable': 'Metrics', 'Tester': ''},
-            color_discrete_map={'Avg_Gross_UPD': '#1E3A8A', 'Avg_Net_UPD': '#28a745'}
+            color_discrete_map={'Avg Test UPD': '#1E3A8A', 'Avg Pass UPD': '#28a745'}
         )
         fig1.add_hline(y=op_plan_val, line_dash="dash", line_color="orange", annotation_text="Planned Target", annotation_position="top right")
         fig1.add_hline(y=op_theo_val, line_dash="dot", line_color="red", annotation_text="Theoretical Max", annotation_position="top right")
@@ -478,7 +480,7 @@ for idx, op in enumerate(selected_ops):
             y='TestQty', 
             color='ProductNo',
             title=f"Product Mix Volume Distribution ({op})",
-            labels={'TestQty': 'Total Insertions (Gross)', 'Tester': '', 'ProductNo': 'Product'},
+            labels={'TestQty': 'Test Qty', 'Tester': '', 'ProductNo': 'Product'},
             color_discrete_sequence=px.colors.qualitative.Pastel
         )
         
