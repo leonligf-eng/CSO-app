@@ -340,7 +340,7 @@ for idx, op in enumerate(selected_ops):
         # Part B: Period Performance Summary
         # ---------------------------------------------------------
         st.markdown("#### 1. Period Performance Summary")
-        st.markdown("<p style='color: #444; font-size: 14px;'>Note: 'Avg Rate' is a 24-hour prorated speed. This represents the weighted average for the operation.</p>", unsafe_allow_html=True)
+        st.markdown("<p style='color: #444; font-size: 14px;'>Note: 'Avg UPD' is a 24-hour prorated speed. This represents the weighted average for the operation.</p>", unsafe_allow_html=True)
         
         total_op_days = op_summary['Active_Days'].sum()
         global_gross_upd = (total_insertions / total_op_days) if total_op_days > 0 else 0
@@ -352,8 +352,8 @@ for idx, op in enumerate(selected_ops):
         global_oee = (total_insertions / global_theo_qty) * 100 if global_theo_qty > 0 else 0
 
         sc1, sc2, sc3 = st.columns(3)
-        with sc1: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Actual Rate (Gross UPD)</div><div class='summary-value'>{global_gross_upd:,.0f}</div></div>", unsafe_allow_html=True)
-        with sc2: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Effective Rate (Net UPD)</div><div class='summary-value'>{global_net_upd:,.0f}</div></div>", unsafe_allow_html=True)
+        with sc1: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Actual UPD (Gross UPD)</div><div class='summary-value'>{global_gross_upd:,.0f}</div></div>", unsafe_allow_html=True)
+        with sc2: st.markdown(f"<div class='summary-card'><div class='summary-title'>Avg Effective UPD (Net UPD)</div><div class='summary-value'>{global_net_upd:,.0f}</div></div>", unsafe_allow_html=True)
         with sc3: st.markdown(f"<div class='summary-card'><div class='summary-title'>Overall OEE</div><div class='summary-value'>{global_oee:.1f}%</div></div>", unsafe_allow_html=True)
 
         st.write("") 
@@ -380,7 +380,7 @@ for idx, op in enumerate(selected_ops):
         st.markdown(f"<div class='insight-box'>{insight_text}</div>", unsafe_allow_html=True)
 
         insight_data = {
-            "Metric": ["Report Avg Rate (Gross)", "Planned Target UPD", "Theoretical Max UPD", f"Implied OEE (at {op_plan_val})"],
+            "Metric": ["Report Avg UPD (Gross)", "Planned Target UPD", "Theoretical Max UPD", f"Implied OEE (at {op_plan_val})"],
             "Value": [f"{global_gross_upd:,.0f}", f"{op_plan_val:,.0f}", f"{op_theo_val:,.0f}", f"{implied_oee:.1f}%"]
         }
         st.dataframe(pd.DataFrame(insight_data).T, use_container_width=True, hide_index=True)
@@ -401,14 +401,14 @@ for idx, op in enumerate(selected_ops):
         display_df = display_df.rename(columns={
             'Tester': 'Tester', 'Lot_Count': 'Lot Count', 
             'First_Yield': 'First Yield', 'Final_Yield (Q)': 'Final Yield (Q)',
-            'Avg_Gross_UPD': 'Avg Rate (TestQty)', 'Avg_Net_UPD': 'Avg Rate (PassQty)', 'Avg_OEE': 'Avg OEE',
+            'Avg_Gross_UPD': 'Avg UPD (TestQty)', 'Avg_Net_UPD': 'Avg UPD (PassQty)', 'Avg_OEE': 'Avg OEE',
             'Active_Days': 'Active Days', 'Availability (A)': 'Availability (A)', 'Performance (P)': 'Performance (P)'
         })
 
         display_df['First Yield'] = display_df['First Yield'].apply(lambda x: f"{x*100:.2f}%")
         display_df['Final Yield (Q)'] = display_df['Final Yield (Q)'].apply(lambda x: f"{x*100:.2f}%")
-        display_df['Avg Rate (TestQty)'] = display_df['Avg Rate (TestQty)'].apply(lambda x: f"{x:,.0f}")
-        display_df['Avg Rate (PassQty)'] = display_df['Avg Rate (PassQty)'].apply(lambda x: f"{x:,.0f}")
+        display_df['Avg UPD (TestQty)'] = display_df['Avg UPD (TestQty)'].apply(lambda x: f"{x:,.0f}")
+        display_df['Avg UPD (PassQty)'] = display_df['Avg UPD (PassQty)'].apply(lambda x: f"{x:,.0f}")
         display_df['Avg OEE'] = display_df['Avg OEE'].apply(lambda x: f"{x*100:.1f}%")
         display_df['Active Days'] = display_df['Active Days'].apply(lambda x: f"{x:.2f}")
         display_df['Availability (A)'] = display_df['Availability (A)'].apply(lambda x: f"{x*100:.1f}%")
@@ -438,7 +438,7 @@ for idx, op in enumerate(selected_ops):
             y=['Avg_Gross_UPD', 'Avg_Net_UPD'], 
             barmode='group',
             title=f"Throughput Comparison & Target Validation ({op})",
-            labels={'value': 'Prorated Rate (UPD)', 'variable': 'Metrics', 'Tester': ''},
+            labels={'value': 'Prorated UPD', 'variable': 'Metrics', 'Tester': ''},
             color_discrete_map={'Avg_Gross_UPD': '#1E3A8A', 'Avg_Net_UPD': '#28a745'}
         )
         fig1.add_hline(y=op_plan_val, line_dash="dash", line_color="orange", annotation_text="Planned Target", annotation_position="top right")
