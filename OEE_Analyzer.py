@@ -4,6 +4,7 @@ import numpy as np
 import plotly.express as px
 from datetime import datetime, timedelta, time
 import io
+import uuid # 🌟 新增：用於產生動態 Key
 
 st.set_page_config(page_title="ATE Capacity & OEE Analyzer", layout="wide")
 
@@ -151,23 +152,31 @@ def load_data(file):
     return generate_mock_data()
 
 
-# 🌟 檔案變更偵測器 (強化清理)
+# 🌟 終極修正：檔案變更與動態 Session ID
 uploaded_file = st.sidebar.file_uploader("Upload Yield Report", type=["xlsx", "xls", "ods"])
 
 current_file_name = uploaded_file.name if uploaded_file is not None else "mock_data"
 
+# 偵測檔案是否更換
 if "last_uploaded_file" not in st.session_state:
     st.session_state.last_uploaded_file = current_file_name
+    # 給予一個獨一無二的 Session ID
+    st.session_state.app_session_id = str(uuid.uuid4())[:8]
 
 if st.session_state.last_uploaded_file != current_file_name:
-    # 檔案改變了，徹底清除所有舊記憶，防止選項錯亂
-    keys_to_delete = ["master_mapping", "saved_progs", "op_select", "prog_select_widget", "prod_select_widget"]
-    # 連帶清除所有動態生成的 multiselect 狀態
+    # 檔案改變了，更新檔案名稱並產生一組新的 Session ID
+    st.session_state.last_uploaded_file = current_file_name
+    st.session_state.app_session_id = str(uuid.uuid4())[:8]
+    
+    # 徹底清除舊有的 Master Mapping
+    if "master_mapping" in st.session_state:
+        del st.session_state["master_mapping"]
+    
+    # 清理所有殘留的 UI 狀態 (包含 OEE 的 filters)
+    keys_to_delete = ["saved_progs", "op_select", "prog_select_widget", "prod_select_widget"]
     for key in list(st.session_state.keys()):
         if key.startswith("map_ui_") or key in keys_to_delete:
             del st.session_state[key]
-    
-    st.session_state.last_uploaded_file = current_file_name
 
 
 raw_df = load_data(uploaded_file)
@@ -205,6 +214,7 @@ with main_tabs[1]:
         prog_to_op = clean_build_df.drop_duplicates(subset=['ProgramName']).set_index('ProgramName')['OpNo'].to_dict()
         available_ops = sorted(clean_build_df['OpNo'].dropna().unique().tolist())
         
+        # 確保 master_mapping 存在
         if "master_mapping" not in st.session_state:
             st.session_state.master_mapping = {phase: [] for phase in build_phases}
             
@@ -219,26 +229,24 @@ with main_tabs[1]:
                 elif "PVT" in p_u: st.session_state.master_mapping["PVT"].append(p)
                 elif "MP" in p_u: st.session_state.master_mapping["MP"].append(p)
 
-        # 🌟 核心功能 1：匯入 Mapping Config
         with st.expander("📥 Import Saved Mapping Configuration", expanded=False):
             st.markdown("<p style='font-size: 13px; color: #666;'>Upload a previously exported mapping CSV file to restore your program classifications instantly.</p>", unsafe_allow_html=True)
-            uploaded_mapping = st.file_uploader("Upload build_mapping_config.csv", type=['csv'], key="mapping_uploader")
+            
+            # 給 uploader 一個動態 key，避免舊檔案殘留
+            uploader_key = f"mapping_uploader_{st.session_state.app_session_id}"
+            uploaded_mapping = st.file_uploader("Upload build_mapping_config.csv", type=['csv'], key=uploader_key)
             
             if uploaded_mapping is not None:
                 try:
-                    # 讀取 CSV
                     mapping_df = pd.read_csv(uploaded_mapping)
                     if 'ProgramName' in mapping_df.columns and 'Build_Phase' in mapping_df.columns:
-                        # 清空現有狀態，避免舊資料殘留
                         new_mapping = {phase: [] for phase in build_phases}
-                        # 依照上傳的設定重新指派
                         for _, row in mapping_df.iterrows():
                             prog = row['ProgramName']
                             phase = row['Build_Phase']
                             if phase in new_mapping and prog in all_programs:
                                 new_mapping[phase].append(prog)
                         
-                        # 如果上傳成功，更新總帳本
                         if st.button("Apply Imported Mapping", type="primary"):
                             st.session_state.master_mapping = new_mapping
                             st.success("Mapping applied successfully! The matrix has been updated.")
@@ -261,7 +269,7 @@ with main_tabs[1]:
             )
             st.write("")
             
-            # 清理那些可能因為檔案切換而殘留在 master_mapping 中的幽靈程式
+            # 確保 master_mapping 裡面的東西真的存在於目前的檔案中 (防錯)
             for phase in build_phases:
                 st.session_state.master_mapping[phase] = [p for p in st.session_state.master_mapping[phase] if p in all_programs]
             
@@ -291,14 +299,18 @@ with main_tabs[1]:
                     
                     options = sorted(list(set(curr_visible_selected + filtered_pool)))
                     
-                    # 🌟 核心防錯機制：確保 default 的值真的在 options 裡面
+                    # 🌟 核心修正：將 app_session_id 加入 UI Key 中！
+                    # 只要檔案一換，app_session_id 就會變，這 8 個 multiselect 就會被視為全新元件，不會報錯！
+                    ui_key = f"map_ui_{phase}_{selected_binning_op}_{st.session_state.app_session_id}"
+                    
+                    # 再次雙重保險：確保 default 的值一定在 options 內
                     safe_default = [x for x in curr_visible_selected if x in options]
                     
                     new_selection = st.multiselect(
                         f"📍 {phase}", 
                         options=options, 
                         default=safe_default, 
-                        key=f"map_ui_{phase}_{selected_binning_op}",
+                        key=ui_key,
                         help=f"Assign {selected_binning_op if selected_binning_op != 'All' else 'any'} programs to {phase}"
                     )
                     
