@@ -151,24 +151,22 @@ def load_data(file):
     return generate_mock_data()
 
 
-# 🌟 核心修正：檔案變更偵測器 (File Change Detector)
+# 🌟 檔案變更偵測器 (強化清理)
 uploaded_file = st.sidebar.file_uploader("Upload Yield Report", type=["xlsx", "xls", "ods"])
 
-# 取得目前上傳檔案的名稱，如果沒有上傳就是 "mock_data"
 current_file_name = uploaded_file.name if uploaded_file is not None else "mock_data"
 
-# 檢查是否與上次紀錄的檔案不同
 if "last_uploaded_file" not in st.session_state:
     st.session_state.last_uploaded_file = current_file_name
 
 if st.session_state.last_uploaded_file != current_file_name:
-    # 如果檔案改變了（包含使用者點擊 X 取消上傳），就徹底清空所有與 Program 相關的記憶！
-    if "master_mapping" in st.session_state:
-        del st.session_state["master_mapping"]
-    if "saved_progs" in st.session_state:
-        del st.session_state["saved_progs"]
+    # 檔案改變了，徹底清除所有舊記憶，防止選項錯亂
+    keys_to_delete = ["master_mapping", "saved_progs", "op_select", "prog_select_widget", "prod_select_widget"]
+    # 連帶清除所有動態生成的 multiselect 狀態
+    for key in list(st.session_state.keys()):
+        if key.startswith("map_ui_") or key in keys_to_delete:
+            del st.session_state[key]
     
-    # 更新記憶，讓系統知道現在是新的狀態
     st.session_state.last_uploaded_file = current_file_name
 
 
@@ -263,6 +261,10 @@ with main_tabs[1]:
             )
             st.write("")
             
+            # 清理那些可能因為檔案切換而殘留在 master_mapping 中的幽靈程式
+            for phase in build_phases:
+                st.session_state.master_mapping[phase] = [p for p in st.session_state.master_mapping[phase] if p in all_programs]
+            
             assigned_progs_all = [p for progs in st.session_state.master_mapping.values() for p in progs]
             unassigned_pool_all = [p for p in all_programs if p not in assigned_progs_all]
             
@@ -289,15 +291,18 @@ with main_tabs[1]:
                     
                     options = sorted(list(set(curr_visible_selected + filtered_pool)))
                     
+                    # 🌟 核心防錯機制：確保 default 的值真的在 options 裡面
+                    safe_default = [x for x in curr_visible_selected if x in options]
+                    
                     new_selection = st.multiselect(
                         f"📍 {phase}", 
                         options=options, 
-                        default=curr_visible_selected, 
+                        default=safe_default, 
                         key=f"map_ui_{phase}_{selected_binning_op}",
                         help=f"Assign {selected_binning_op if selected_binning_op != 'All' else 'any'} programs to {phase}"
                     )
                     
-                    if set(new_selection) != set(curr_visible_selected):
+                    if set(new_selection) != set(safe_default):
                         if selected_binning_op == "All":
                             protected_progs = []
                         else:
