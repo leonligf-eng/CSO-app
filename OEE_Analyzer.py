@@ -170,7 +170,7 @@ st.sidebar.divider()
 main_tabs = st.tabs(["📊 OEE Analyzer", "🧬 Overall Build Yield"])
 
 # ==============================================================================
-# --- 🧬 Tab 2: Overall Build Yield Tracking (雙層記憶體強化版) ---
+# --- 🧬 Tab 2: Overall Build Yield Tracking (包含自訂良率門檻) ---
 # ==============================================================================
 with main_tabs[1]:
     st.write("")
@@ -183,16 +183,12 @@ with main_tabs[1]:
         build_phases = ["Proto1.0", "Proto1.1", "EVT1.0(A0)", "EVT1.0(B0)", "EVT1.1", "DVT", "PVT", "MP"]
         all_programs = sorted(clean_build_df['ProgramName'].dropna().unique().tolist())
         
-        # 建立 ProgramName -> OpNo 的快速對應字典
         prog_to_op = clean_build_df.drop_duplicates(subset=['ProgramName']).set_index('ProgramName')['OpNo'].to_dict()
         available_ops = sorted(clean_build_df['OpNo'].dropna().unique().tolist())
         
-        # 🌟 核心修正：建立「背景總帳本 (Master Ledger)」
-        # 這裡存放的是「所有站點」最真實的分類狀態，絕對不會因為 UI 切換而被清掉
         if "master_mapping" not in st.session_state:
             st.session_state.master_mapping = {phase: [] for phase in build_phases}
             
-            # 初始化的智慧分類 (僅執行一次)
             for p in all_programs:
                 p_u = p.upper()
                 if "PROTO1.0" in p_u or "P10" in p_u: st.session_state.master_mapping["Proto1.0"].append(p)
@@ -208,7 +204,6 @@ with main_tabs[1]:
         with st.expander("⚙️ Build Phase Mapping Configuration (Interactive Binning)", expanded=True):
             st.markdown("<p style='font-size: 14px; color: #555;'>Assign programs to their corresponding Build Phases. Use the filter below to classify programs operation by operation.</p>", unsafe_allow_html=True)
             
-            # 站點過濾器
             st.markdown("##### 🔍 1. Select Operation to Filter Programs")
             selected_binning_op = st.radio(
                 "Filter by OpNo:", 
@@ -218,11 +213,9 @@ with main_tabs[1]:
             )
             st.write("")
             
-            # 計算目前的總分配狀態
             assigned_progs_all = [p for progs in st.session_state.master_mapping.values() for p in progs]
             unassigned_pool_all = [p for p in all_programs if p not in assigned_progs_all]
             
-            # 動態過濾 Pool (只顯示當前選定站點且尚未分配的程式)
             if selected_binning_op == "All":
                 filtered_pool = unassigned_pool_all
             else:
@@ -237,72 +230,96 @@ with main_tabs[1]:
             cols1, cols2 = st.columns(4), st.columns(4)
             all_cols = cols1 + cols2
             
-            # 處理 8 個分類槽位的渲染與狀態更新
             for i, phase in enumerate(build_phases):
                 with all_cols[i]:
-                    # 1. 從總帳本中，撈出「屬於這個 Phase」且「符合當前過濾站點」的程式，準備顯示在 UI 上
                     if selected_binning_op == "All":
                         curr_visible_selected = [p for p in st.session_state.master_mapping[phase] if p in all_programs]
                     else:
                         curr_visible_selected = [p for p in st.session_state.master_mapping[phase] if p in all_programs and prog_to_op.get(p) == selected_binning_op]
                     
-                    # 2. 準備 UI 下拉選單的選項 (目前顯示已選的 + 該站點還沒被選的)
                     options = sorted(list(set(curr_visible_selected + filtered_pool)))
                     
-                    # 3. 渲染 UI，並捕捉使用者的最新選擇
                     new_selection = st.multiselect(
                         f"📍 {phase}", 
                         options=options, 
                         default=curr_visible_selected, 
-                        key=f"map_ui_{phase}_{selected_binning_op}", # Key 必須包含站點名稱，強制 Streamlit 知道這是不同畫面
+                        key=f"map_ui_{phase}_{selected_binning_op}",
                         help=f"Assign {selected_binning_op if selected_binning_op != 'All' else 'any'} programs to {phase}"
                     )
                     
-                    # 4. 🌟 核心寫回總帳本機制：
-                    # 如果使用者在 UI 上改變了選擇，我們要把新選擇寫回總帳本。
-                    # 但千萬不能覆蓋掉其他站點的紀錄！
                     if set(new_selection) != set(curr_visible_selected):
-                        # 先找出總帳本中，那些「不屬於」當前過濾站點的舊有紀錄 (我們要保護它們)
                         if selected_binning_op == "All":
-                            protected_progs = [] # 全選模式下，沒有需要特別保護的，因為 UI 已經顯示全部了
+                            protected_progs = []
                         else:
                             protected_progs = [p for p in st.session_state.master_mapping[phase] if prog_to_op.get(p) != selected_binning_op]
                         
-                        # 總帳本的最新狀態 = 受保護的其他站點紀錄 + 當前站點的新選擇
                         st.session_state.master_mapping[phase] = protected_progs + new_selection
-                        st.rerun() # 強制刷新畫面，讓 Pool 和其他選單立刻反應變更
+                        st.rerun()
 
-        # --- 生成矩陣報表 (永遠讀取最真實的總帳本) ---
-        prog_to_build = {p: phase for phase, progs in st.session_state.master_mapping.items() for p in progs}
-        build_df = clean_build_df.copy()
-        build_df['Build_Phase'] = build_df['ProgramName'].map(prog_to_build)
-        build_df = build_df.dropna(subset=['Build_Phase'])
+        # 🌟 新增：自訂良率警示門檻 UI
+        st.write("")
+        col_matrix, col_settings = st.columns([3, 1])
         
-        if build_df.empty:
-            st.info("💡 Please assign at least one program to a Build Phase above to generate the Matrix Report.")
-        else:
-            st.markdown("#### 📊 Build Evolution Matrix (Testing Yield %)")
+        with col_settings:
+            st.markdown("#### 🎨 Color Thresholds")
+            st.markdown("<p style='font-size: 13px; color: #666;'>Adjust the limits for Matrix visual alerts.</p>", unsafe_allow_html=True)
             
-            matrix_sum = build_df.groupby(['OpNo', 'Build_Phase']).agg(T_Qty=('TestQty', 'sum'), P_Qty=('PassQty', 'sum')).reset_index()
-            matrix_sum['Yield'] = np.where(matrix_sum['T_Qty'] > 0, (matrix_sum['P_Qty'] / matrix_sum['T_Qty']) * 100, np.nan)
-            pivot_yield = matrix_sum.pivot(index='OpNo', columns='Build_Phase', values='Yield')
+            green_threshold = st.number_input(
+                "🟩 Healthy Threshold (%)", 
+                min_value=0.0, max_value=100.0, value=95.0, step=0.5,
+                help="Yields equal to or above this value will be highlighted in Green."
+            )
             
-            exist_phases = [p for p in build_phases if p in pivot_yield.columns]
+            red_threshold = st.number_input(
+                "🟥 Critical Threshold (%)", 
+                min_value=0.0, max_value=100.0, value=90.0, step=0.5,
+                help="Yields strictly below this value will be highlighted in Red. Values between Red and Green thresholds will be Yellow."
+            )
             
-            # 純粹的站點良率矩陣 (已移除 CUM Yield)
-            final_matrix = pivot_yield[exist_phases]
-            
-            def color_yield_matrix(val):
-                if pd.isna(val): return ''
-                color = '#e6f4ea' if val >= 95 else '#fff3cd' if val >= 90 else '#fdecea'
-                return f'background-color: {color}; font-weight: bold; color: #333;'
+            if red_threshold >= green_threshold:
+                st.error("Critical threshold must be lower than Healthy threshold.")
 
-            styled_matrix = final_matrix.style.map(color_yield_matrix).format("{:.2f}%", na_rep="-").set_properties(**{'text-align': 'center', 'font-size': '15px'}).set_table_styles([
-                {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#f0f2f6'), ('color', '#31333F'), ('font-size', '14px')]},
-                {'selector': 'th.row_heading', 'props': [('text-align', 'left'), ('min-width', '200px')]}
-            ])
+        # --- 生成矩陣報表 ---
+        with col_matrix:
+            prog_to_build = {p: phase for phase, progs in st.session_state.master_mapping.items() for p in progs}
+            build_df = clean_build_df.copy()
+            build_df['Build_Phase'] = build_df['ProgramName'].map(prog_to_build)
+            build_df = build_df.dropna(subset=['Build_Phase'])
+            
+            if build_df.empty:
+                st.info("💡 Please assign at least one program to a Build Phase above to generate the Matrix Report.")
+            else:
+                st.markdown("#### 📊 Build Evolution Matrix (Testing Yield %)")
+                
+                matrix_sum = build_df.groupby(['OpNo', 'Build_Phase']).agg(T_Qty=('TestQty', 'sum'), P_Qty=('PassQty', 'sum')).reset_index()
+                matrix_sum['Yield'] = np.where(matrix_sum['T_Qty'] > 0, (matrix_sum['P_Qty'] / matrix_sum['T_Qty']) * 100, np.nan)
+                pivot_yield = matrix_sum.pivot(index='OpNo', columns='Build_Phase', values='Yield')
+                
+                exist_phases = [p for p in build_phases if p in pivot_yield.columns]
+                
+                final_matrix = pivot_yield[exist_phases]
+                
+                # 🌟 將使用者的自訂門檻應用到上色函數中
+                def color_yield_matrix(val):
+                    if pd.isna(val): return ''
+                    # 使用者自訂的邏輯：
+                    # >= green_threshold -> 綠色
+                    # >= red_threshold (且 < green) -> 黃色
+                    # < red_threshold -> 紅色
+                    if val >= green_threshold:
+                        color = '#e6f4ea' # 淺綠
+                    elif val >= red_threshold:
+                        color = '#fff3cd' # 淺黃
+                    else:
+                        color = '#fdecea' # 淺紅
+                    return f'background-color: {color}; font-weight: bold; color: #333;'
 
-            st.dataframe(styled_matrix, use_container_width=True)
+                styled_matrix = final_matrix.style.map(color_yield_matrix).format("{:.2f}%", na_rep="-").set_properties(**{'text-align': 'center', 'font-size': '15px'}).set_table_styles([
+                    {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#f0f2f6'), ('color', '#31333F'), ('font-size', '14px')]},
+                    {'selector': 'th.row_heading', 'props': [('text-align', 'left'), ('min-width', '200px')]}
+                ])
+
+                st.dataframe(styled_matrix, use_container_width=True)
 
 # ==============================================================================
 # --- 📊 Tab 1: OEE Analyzer (完全無改動區塊) ---
@@ -492,7 +509,6 @@ with main_tabs[0]:
             targets[op] = {'theo': theo, 'plan': plan}
             st.sidebar.write("") 
 
-    # ⚠️ 這裡完整保留您的 st.stop()
     if not selected_ops or not selected_progs or not selected_prods:
         st.info("👆 Please select **OpNo, ProgramName, and ProductNo** above to generate the report.")
         st.stop()
