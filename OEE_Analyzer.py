@@ -80,7 +80,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 🌟 V51 核心修正：將主標題移至最頂層，確保無論有無資料都會顯示
 st.markdown("# 📈 ATE OEE Analyzer")
 
 # ==============================================================================
@@ -93,9 +92,13 @@ def generate_mock_data():
     data = []
     testers = [f"HP93K-EXA{i:02d}" for i in range(2, 10)]
     ops = ["FT1", "FTA", "MT1"]
-    programs_map = {"FT1": ["PROD_GS631_FT1_REV1", "PROD_GS631_FT1_REV2"], 
-                    "FTA": ["PROD_GS631_FTA_REV1"], 
-                    "MT1": ["PROD_GS631_MT1_REV1"]}
+    
+    # 🌟 微調了 Mock Data，加入 Phase 關鍵字以便展示自動 Mapping 功能
+    programs_map = {
+        "FT1": ["PROD_GS631_FT1_Proto1.0", "PROD_GS631_FT1_EVT1.0(A0)", "PROD_GS631_FT1_DVT"], 
+        "FTA": ["PROD_GS631_FTA_Proto1.1", "PROD_GS631_FTA_EVT1.1", "PROD_GS631_FTA_PVT"], 
+        "MT1": ["PROD_GS631_MT1_EVT1.0(B0)", "PROD_GS631_MT1_MP"]
+    }
     products = ["SS16G", "MU16G", "HY12G", "SS12G"]
     
     tester_clocks = {tester: now - timedelta(days=30) for tester in testers}
@@ -412,8 +415,11 @@ tester_summary = tester_summary.sort_values(by=['OpNo', 'Tester'], ascending=Tru
 # ==============================================================================
 st.markdown("<p style='color: #444; font-size: 14px;'>Select an Operation tab below to view its isolated performance and capacity planning insights.</p>", unsafe_allow_html=True)
 
-tabs = st.tabs(selected_ops)
+# 🌟 V52: 準備 Tabs，將 "Overall Build Yield" 固定放在最右側
+tab_names = list(selected_ops) + ["🧬 Overall Build Yield"]
+tabs = st.tabs(tab_names)
 
+# --- 處理一般站點的 Tabs ---
 for idx, op in enumerate(selected_ops):
     with tabs[idx]:
         st.write("") 
@@ -602,3 +608,132 @@ for idx, op in enumerate(selected_ops):
         st.markdown("#### 5. Raw Data")
         with st.expander(f"Click to view raw data for {op}"):
             st.dataframe(op_df, use_container_width=True, hide_index=True)
+
+
+# ==============================================================================
+# --- 🌟 V52: Overall Build Yield Tab (Interactive Matrix) ---
+# ==============================================================================
+with tabs[-1]:
+    st.write("")
+    
+    # 標準的 8 個 Build Phase 階段
+    build_phases = ["Proto1.0", "Proto1.1", "EVT1.0(A0)", "EVT1.0(B0)", "EVT1.1", "DVT", "PVT", "MP"]
+    all_programs = sorted(filtered_df['ProgramName'].dropna().unique().tolist())
+    
+    # 初始化 Mapping Session State
+    if "build_mapping" not in st.session_state:
+        st.session_state.build_mapping = {phase: [] for phase in build_phases}
+        
+        # --- 自動分類腳本 (Smart Auto-Assign) ---
+        # 如果程式名稱包含關鍵字，系統自動幫你歸類，省去大量手動時間
+        for p in all_programs:
+            p_upper = p.upper()
+            if "PROTO1.0" in p_upper or "P10" in p_upper: st.session_state.build_mapping["Proto1.0"].append(p)
+            elif "PROTO1.1" in p_upper or "P11" in p_upper: st.session_state.build_mapping["Proto1.1"].append(p)
+            elif "EVT1.0(A0)" in p_upper or "EVT1.0_A" in p_upper: st.session_state.build_mapping["EVT1.0(A0)"].append(p)
+            elif "EVT1.0(B0)" in p_upper or "EVT1.0_B" in p_upper: st.session_state.build_mapping["EVT1.0(B0)"].append(p)
+            elif "EVT1.1" in p_upper: st.session_state.build_mapping["EVT1.1"].append(p)
+            elif "DVT" in p_upper: st.session_state.build_mapping["DVT"].append(p)
+            elif "PVT" in p_upper: st.session_state.build_mapping["PVT"].append(p)
+            elif "MP" in p_upper: st.session_state.build_mapping["MP"].append(p)
+
+    # 找出已經被分配的程式
+    assigned_progs = []
+    for progs in st.session_state.build_mapping.values():
+        assigned_progs.extend(progs)
+        
+    # 尚未分配的程式 (Pool)
+    unassigned_pool = [p for p in all_programs if p not in assigned_progs]
+    
+    # --- UI: 互動式分類器 (Smart Binning UI) ---
+    with st.expander("⚙️ Build Phase Mapping Configuration (Interactive Binning)", expanded=True):
+        st.markdown("<p style='font-size: 14px; color: #555;'>Assign programs to their corresponding Build Phases. Selected programs will automatically disappear from other menus.</p>", unsafe_allow_html=True)
+        
+        st.markdown(f"**📦 Unassigned Program Pool ({len(unassigned_pool)})**")
+        st.caption(", ".join(unassigned_pool) if unassigned_pool else "🎉 All active programs have been successfully assigned to a Build Phase!")
+        st.write("")
+        
+        # 建立 2 排 4 欄的排版
+        cols1 = st.columns(4)
+        cols2 = st.columns(4)
+        all_cols = cols1 + cols2
+        
+        for i, phase in enumerate(build_phases):
+            with all_cols[i]:
+                # 目前已經在這個 Phase 的程式 (需過濾掉可能已不存在於這批資料的歷史垃圾紀錄)
+                curr_selected = [p for p in st.session_state.build_mapping[phase] if p in all_programs]
+                
+                # 選單的選項 = 自己原本的 + 池子裡沒人要的
+                options = sorted(list(set(curr_selected + unassigned_pool)))
+                
+                st.session_state.build_mapping[phase] = st.multiselect(
+                    f"📍 {phase}",
+                    options=options,
+                    default=curr_selected,
+                    key=f"map_{phase}"
+                )
+
+    # --- Data Engine: 矩陣報表計算 ---
+    # 建立反向字典: ProgramName -> Build Phase
+    prog_to_build = {}
+    for phase, progs in st.session_state.build_mapping.items():
+        for p in progs:
+            prog_to_build[p] = phase
+            
+    build_df = filtered_df.copy()
+    build_df['Build_Phase'] = build_df['ProgramName'].map(prog_to_build)
+    build_df = build_df.dropna(subset=['Build_Phase']) # 濾掉沒被分類的
+    
+    if build_df.empty:
+        st.info("💡 Please assign at least one program to a Build Phase above to generate the Matrix Report.")
+    else:
+        st.markdown("#### 📊 Build Evolution Matrix (Testing Yield %)")
+        st.caption("Note: 'MBU Test CUM yield' is calculated by multiplying the Testing Yield of all listed operations within that phase.")
+        
+        # 第一步：計算各 Phase & OpNo 的良率
+        matrix_sum = build_df.groupby(['OpNo', 'Build_Phase']).agg(
+            T_Qty=('TestQty', 'sum'),
+            P_Qty=('PassQty', 'sum')
+        ).reset_index()
+        
+        # 避免除以零
+        matrix_sum['Yield'] = np.where(matrix_sum['T_Qty'] > 0, (matrix_sum['P_Qty'] / matrix_sum['T_Qty']) * 100, np.nan)
+        
+        # 第二步：Pivot 樞紐分析 (橫向展開)
+        pivot_yield = matrix_sum.pivot(index='OpNo', columns='Build_Phase', values='Yield')
+        
+        # 強制照我們定義好的時間軸排序 Columns
+        exist_phases = [p for p in build_phases if p in pivot_yield.columns]
+        pivot_yield = pivot_yield[exist_phases]
+        
+        # 第三步：計算 CUM Yield (跨站點良率相乘)
+        cum_yields = {}
+        for col in pivot_yield.columns:
+            col_yields = pivot_yield[col].dropna() / 100.0
+            if not col_yields.empty:
+                cum_yields[col] = col_yields.prod() * 100.0
+            else:
+                cum_yields[col] = np.nan
+                
+        cum_row = pd.DataFrame([cum_yields], index=['MBU Test CUM yield'])
+        
+        # 第四步：合併 CUM row 與 各站點明細，產生最終矩陣
+        final_matrix = pd.concat([cum_row, pivot_yield])
+        
+        # 第五步：視覺化排版 (Pandas Styler)
+        def color_yield_matrix(val):
+            if pd.isna(val): return ''
+            # 大於 95% 淺綠，90~95% 淺黃，低於 90% 淺紅
+            color = '#e6f4ea' if val >= 95 else '#fff3cd' if val >= 90 else '#fdecea'
+            return f'background-color: {color}; font-weight: bold; color: #333;'
+
+        styled_matrix = final_matrix.style\
+            .map(color_yield_matrix)\
+            .format("{:.2f}%", na_rep="-")\
+            .set_properties(**{'text-align': 'center', 'font-size': '15px'})\
+            .set_table_styles([
+                {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#f0f2f6'), ('color', '#31333F'), ('font-size', '14px')]},
+                {'selector': 'th.row_heading', 'props': [('text-align', 'left'), ('min-width', '200px')]} # 左側列名靠左對齊
+            ])
+
+        st.dataframe(styled_matrix, use_container_width=True)
