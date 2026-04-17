@@ -92,15 +92,19 @@ def generate_mock_data():
     now = datetime.now()
     data = []
     testers = [f"HP93K-EXA{i:02d}" for i in range(2, 10)]
-    ops = ["FT1", "FTA", "MT1"]
-    programs_map = {"FT1": ["PROD_GS631_FT1_REV1", "PROD_GS631_FT1_REV2"], 
-                    "FTA": ["PROD_GS631_FTA_REV1"], 
-                    "MT1": ["PROD_GS631_MT1_REV1"]}
+    ops = ["FT1", "FTA", "MT1", "SLT", "QA"]
+    programs_map = {
+        "FT1": ["PROD_GS631_FT1_Proto1", "PROD_GS631_FT1_EVT1"], 
+        "FTA": ["PROD_GS631_FTA_Proto1"], 
+        "MT1": ["PROD_GS631_MT1_EVT1"],
+        "SLT": ["PROD_GS631_SLT_Proto1", "PROD_GS631_SLT_EVT1"],
+        "QA":  ["PROD_GS631_QA_Proto1", "PROD_GS631_QA_EVT1"]
+    }
     products = ["SS16G", "MU16G", "HY12G", "SS12G"]
     
     tester_clocks = {tester: now - timedelta(days=30) for tester in testers}
     
-    for i in range(250):
+    for i in range(350):
         tester = np.random.choice(testers)
         op = np.random.choice(ops)
         prog = np.random.choice(programs_map[op])
@@ -111,10 +115,7 @@ def generate_mock_data():
         test_duration = timedelta(hours=np.random.uniform(6, 14))
         end_time = start_time + test_duration
         
-        if op == "FT1": qty = np.random.randint(3000, 5000)
-        elif op == "FTA": qty = np.random.randint(5000, 8000)
-        else: qty = np.random.randint(15000, 25000)
-        
+        qty = np.random.randint(3000, 8000)
         first_yield_rate = np.random.uniform(0.85, 0.95)
         final_yield_rate = np.random.uniform(first_yield_rate, 0.99)
         
@@ -169,12 +170,11 @@ st.sidebar.divider()
 main_tabs = st.tabs(["📊 OEE Analyzer", "🧬 Overall Build Yield"])
 
 # ==============================================================================
-# --- 🧬 Tab 2: Overall Build Yield Tracking (強化狀態管理版 + 站點過濾器) ---
+# --- 🧬 Tab 2: Overall Build Yield Tracking (雙層記憶體強化版) ---
 # ==============================================================================
 with main_tabs[1]:
     st.write("")
     
-    # 這裡直接讀取 raw_df (經過 min_lot_size 清理)
     clean_build_df = raw_df[raw_df['TestQty'] >= min_lot_size].copy()
     
     if clean_build_df.empty:
@@ -183,38 +183,32 @@ with main_tabs[1]:
         build_phases = ["Proto1.0", "Proto1.1", "EVT1.0(A0)", "EVT1.0(B0)", "EVT1.1", "DVT", "PVT", "MP"]
         all_programs = sorted(clean_build_df['ProgramName'].dropna().unique().tolist())
         
-        # 🌟 新增：建立 ProgramName -> OpNo 的對應字典，用於 UI 過濾
+        # 建立 ProgramName -> OpNo 的快速對應字典
         prog_to_op = clean_build_df.drop_duplicates(subset=['ProgramName']).set_index('ProgramName')['OpNo'].to_dict()
         available_ops = sorted(clean_build_df['OpNo'].dropna().unique().tolist())
         
-        if "build_mapping" not in st.session_state:
-            st.session_state.build_mapping = {phase: [] for phase in build_phases}
-            # 簡易智慧分類
+        # 🌟 核心修正：建立「背景總帳本 (Master Ledger)」
+        # 這裡存放的是「所有站點」最真實的分類狀態，絕對不會因為 UI 切換而被清掉
+        if "master_mapping" not in st.session_state:
+            st.session_state.master_mapping = {phase: [] for phase in build_phases}
+            
+            # 初始化的智慧分類 (僅執行一次)
             for p in all_programs:
                 p_u = p.upper()
-                if "PROTO1.0" in p_u or "P10" in p_u: st.session_state.build_mapping["Proto1.0"].append(p)
-                elif "PROTO1.1" in p_u or "P11" in p_u: st.session_state.build_mapping["Proto1.1"].append(p)
-                elif "EVT1.0(A0)" in p_u or "EVT1.0_A" in p_u: st.session_state.build_mapping["EVT1.0(A0)"].append(p)
-                elif "EVT1.0(B0)" in p_u or "EVT1.0_B" in p_u: st.session_state.build_mapping["EVT1.0(B0)"].append(p)
-                elif "EVT1.1" in p_u: st.session_state.build_mapping["EVT1.1"].append(p)
-                elif "DVT" in p_u: st.session_state.build_mapping["DVT"].append(p)
-                elif "PVT" in p_u: st.session_state.build_mapping["PVT"].append(p)
-                elif "MP" in p_u: st.session_state.build_mapping["MP"].append(p)
+                if "PROTO1.0" in p_u or "P10" in p_u: st.session_state.master_mapping["Proto1.0"].append(p)
+                elif "PROTO1.1" in p_u or "P11" in p_u: st.session_state.master_mapping["Proto1.1"].append(p)
+                elif "EVT1.0(A0)" in p_u or "EVT1.0_A" in p_u: st.session_state.master_mapping["EVT1.0(A0)"].append(p)
+                elif "EVT1.0(B0)" in p_u or "EVT1.0_B" in p_u: st.session_state.master_mapping["EVT1.0(B0)"].append(p)
+                elif "EVT1.1" in p_u: st.session_state.master_mapping["EVT1.1"].append(p)
+                elif "DVT" in p_u: st.session_state.master_mapping["DVT"].append(p)
+                elif "PVT" in p_u: st.session_state.master_mapping["PVT"].append(p)
+                elif "MP" in p_u: st.session_state.master_mapping["MP"].append(p)
 
-        # 強制狀態同步器
-        for phase in build_phases:
-            widget_key = f"map_{phase}"
-            if widget_key in st.session_state:
-                st.session_state.build_mapping[phase] = st.session_state[widget_key]
-
-        assigned_progs = [p for progs in st.session_state.build_mapping.values() for p in progs]
-        unassigned_pool = [p for p in all_programs if p not in assigned_progs]
-        
-        # --- 互動式分類器 ---
+        # --- 互動式分類器 UI ---
         with st.expander("⚙️ Build Phase Mapping Configuration (Interactive Binning)", expanded=True):
-            st.markdown("<p style='font-size: 14px; color: #555;'>Assign programs to their corresponding Build Phases. To make assignment easier, use the filter below to classify programs operation by operation.</p>", unsafe_allow_html=True)
+            st.markdown("<p style='font-size: 14px; color: #555;'>Assign programs to their corresponding Build Phases. Use the filter below to classify programs operation by operation.</p>", unsafe_allow_html=True)
             
-            # 🌟 新增：站點過濾 UI
+            # 站點過濾器
             st.markdown("##### 🔍 1. Select Operation to Filter Programs")
             selected_binning_op = st.radio(
                 "Filter by OpNo:", 
@@ -224,11 +218,15 @@ with main_tabs[1]:
             )
             st.write("")
             
-            # 🌟 動態過濾 Pool
+            # 計算目前的總分配狀態
+            assigned_progs_all = [p for progs in st.session_state.master_mapping.values() for p in progs]
+            unassigned_pool_all = [p for p in all_programs if p not in assigned_progs_all]
+            
+            # 動態過濾 Pool (只顯示當前選定站點且尚未分配的程式)
             if selected_binning_op == "All":
-                filtered_pool = unassigned_pool
+                filtered_pool = unassigned_pool_all
             else:
-                filtered_pool = [p for p in unassigned_pool if prog_to_op.get(p) == selected_binning_op]
+                filtered_pool = [p for p in unassigned_pool_all if prog_to_op.get(p) == selected_binning_op]
 
             st.markdown(f"##### 📦 2. Unassigned Program Pool ({len(filtered_pool)})")
             if selected_binning_op != "All":
@@ -239,37 +237,43 @@ with main_tabs[1]:
             cols1, cols2 = st.columns(4), st.columns(4)
             all_cols = cols1 + cols2
             
+            # 處理 8 個分類槽位的渲染與狀態更新
             for i, phase in enumerate(build_phases):
                 with all_cols[i]:
-                    # 找出這個 Phase 裡面，符合當前站點過濾的已選擇程式
+                    # 1. 從總帳本中，撈出「屬於這個 Phase」且「符合當前過濾站點」的程式，準備顯示在 UI 上
                     if selected_binning_op == "All":
-                        curr_selected = [p for p in st.session_state.build_mapping[phase] if p in all_programs]
+                        curr_visible_selected = [p for p in st.session_state.master_mapping[phase] if p in all_programs]
                     else:
-                        curr_selected = [p for p in st.session_state.build_mapping[phase] if p in all_programs and prog_to_op.get(p) == selected_binning_op]
+                        curr_visible_selected = [p for p in st.session_state.master_mapping[phase] if p in all_programs and prog_to_op.get(p) == selected_binning_op]
                     
-                    # 選單的選項 = 符合過濾條件的 (已選 + 未選)
-                    options = sorted(list(set(curr_selected + filtered_pool)))
+                    # 2. 準備 UI 下拉選單的選項 (目前顯示已選的 + 該站點還沒被選的)
+                    options = sorted(list(set(curr_visible_selected + filtered_pool)))
                     
-                    st.multiselect(
+                    # 3. 渲染 UI，並捕捉使用者的最新選擇
+                    new_selection = st.multiselect(
                         f"📍 {phase}", 
                         options=options, 
-                        default=curr_selected, 
-                        key=f"map_{phase}",
-                        # 如果選擇了特定站點，提示文字會改變
+                        default=curr_visible_selected, 
+                        key=f"map_ui_{phase}_{selected_binning_op}", # Key 必須包含站點名稱，強制 Streamlit 知道這是不同畫面
                         help=f"Assign {selected_binning_op if selected_binning_op != 'All' else 'any'} programs to {phase}"
                     )
-            
-            # 🌟 隱藏機關：如果是在「特定站點」模式下，我們需要把「不屬於這個站點，但已經被分配在這個 Phase」的程式默默補回去 Session State，以免它們被洗掉。
-            if selected_binning_op != "All":
-                 for phase in build_phases:
-                     widget_key = f"map_{phase}"
-                     if widget_key in st.session_state:
-                         # 取出原本就存在，但不屬於現在這個過濾站點的程式
-                         hidden_progs = [p for p in st.session_state.build_mapping[phase] if prog_to_op.get(p) != selected_binning_op]
-                         # 將 UI 上選的，跟隱藏的合併回去
-                         st.session_state.build_mapping[phase] = st.session_state[widget_key] + hidden_progs
+                    
+                    # 4. 🌟 核心寫回總帳本機制：
+                    # 如果使用者在 UI 上改變了選擇，我們要把新選擇寫回總帳本。
+                    # 但千萬不能覆蓋掉其他站點的紀錄！
+                    if set(new_selection) != set(curr_visible_selected):
+                        # 先找出總帳本中，那些「不屬於」當前過濾站點的舊有紀錄 (我們要保護它們)
+                        if selected_binning_op == "All":
+                            protected_progs = [] # 全選模式下，沒有需要特別保護的，因為 UI 已經顯示全部了
+                        else:
+                            protected_progs = [p for p in st.session_state.master_mapping[phase] if prog_to_op.get(p) != selected_binning_op]
+                        
+                        # 總帳本的最新狀態 = 受保護的其他站點紀錄 + 當前站點的新選擇
+                        st.session_state.master_mapping[phase] = protected_progs + new_selection
+                        st.rerun() # 強制刷新畫面，讓 Pool 和其他選單立刻反應變更
 
-        prog_to_build = {p: phase for phase, progs in st.session_state.build_mapping.items() for p in progs}
+        # --- 生成矩陣報表 (永遠讀取最真實的總帳本) ---
+        prog_to_build = {p: phase for phase, progs in st.session_state.master_mapping.items() for p in progs}
         build_df = clean_build_df.copy()
         build_df['Build_Phase'] = build_df['ProgramName'].map(prog_to_build)
         build_df = build_df.dropna(subset=['Build_Phase'])
@@ -285,6 +289,7 @@ with main_tabs[1]:
             
             exist_phases = [p for p in build_phases if p in pivot_yield.columns]
             
+            # 純粹的站點良率矩陣 (已移除 CUM Yield)
             final_matrix = pivot_yield[exist_phases]
             
             def color_yield_matrix(val):
