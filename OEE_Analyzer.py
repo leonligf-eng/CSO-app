@@ -77,21 +77,26 @@ st.markdown("""
         border-radius: 4px !important;
     }
 
-    /* 🌟 客製化 Apply 按鈕 (現代感) */
-    div[data-testid="stButton"] button:contains("Apply Imported Mapping"),
-    #btn-apply-mapping {
-        background-color: #334155 !important; /* Slate-700 */
+    /* 🌟 選項 A：科技湛藍 (Tech Blue) */
+    div.stButton > button {
+        background-color: #0ea5e9 !important; /* Sky 500 */
         color: white !important;
         border: none !important;
-        border-radius: 6px !important;
-        padding: 0.5rem 1rem !important;
+        border-radius: 8px !important;
+        padding: 0.6rem 1.2rem !important;
         font-weight: 600 !important;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1) !important;
-        transition: all 0.2s !important;
+        font-size: 15px !important;
+        box-shadow: 0 4px 6px -1px rgba(14, 165, 233, 0.3), 0 2px 4px -1px rgba(14, 165, 233, 0.2) !important;
+        transition: all 0.2s ease-in-out !important;
     }
-    div[data-testid="stButton"] button:contains("Apply Imported Mapping"):hover {
-        background-color: #1E293B !important; /* Slate-800 */
-        box-shadow: 0 6px 8px -1px rgba(0, 0, 0, 0.15) !important;
+    div.stButton > button:hover {
+        background-color: #0284c7 !important; /* Sky 600 */
+        box-shadow: 0 6px 8px -1px rgba(14, 165, 233, 0.4), 0 4px 6px -1px rgba(14, 165, 233, 0.3) !important;
+        transform: translateY(-1px) !important;
+    }
+    div.stButton > button:active {
+        transform: translateY(1px) !important;
+        box-shadow: none !important;
     }
 
     /* 🌟 方案 B：藍天科技風 (Sky Blue / Cloud Native) */
