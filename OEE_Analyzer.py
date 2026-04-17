@@ -80,25 +80,27 @@ st.markdown("""
         border-radius: 4px !important;
     }
 
-    /* 🌟 新增：HTML Table Styling 用於複合矩陣渲染 */
+    /* 🌟 新增：HTML Table Styling 用於複合矩陣渲染 (響應式自動縮放) */
     .custom-matrix-table {
         width: 100%;
         border-collapse: collapse;
         margin: 15px 0;
-        font-size: 15px;
+        font-size: 14px; /* 字體稍微縮小一點點適應小螢幕 */
         font-family: sans-serif;
+        table-layout: fixed; /* 關鍵：強制平均分配寬度 */
+        word-wrap: break-word; /* 關鍵：允許長文字斷行 */
     }
     .custom-matrix-table th {
         background-color: #f0f2f6;
         color: #31333F;
         text-align: center;
-        padding: 10px;
+        padding: 8px 4px; /* 減少 padding 節省空間 */
         border: 1px solid #dee2e6;
-        font-size: 14px;
+        font-size: 13px;
     }
     .custom-matrix-table td {
         text-align: center;
-        padding: 10px;
+        padding: 8px 4px; /* 減少 padding 節省空間 */
         border: 1px solid #dee2e6;
         vertical-align: middle;
     }
@@ -387,7 +389,7 @@ with main_tabs[1]:
                         del st.session_state[k]
                 st.rerun()
 
-# 🌟 核心功能 2：匯出 Mapping Config
+            # 🌟 核心功能 2：匯出 Mapping Config
             st.write("")
             st.divider()
             
@@ -479,13 +481,14 @@ with main_tabs[1]:
             all_used_phases = build_df['Build_Phase'].unique().tolist()
             ordered_phases = [p for p in build_phases if p in all_used_phases]
             
-            # 加上一個外層容器，並允許水平捲動 (以防欄位真的太多)
-            html_out = '<div style="overflow-x: auto;">'
+            # 使用 width: 100% 讓其響應式縮放
+            html_out = '<div style="width: 100%;">'
             html_out += '<table class="custom-matrix-table">'
-            # 統一表頭
-            html_out += '<thead><tr><th style="min-width: 120px;">Operation</th>'
+            # 統一表頭，移除 min-width 限制，讓 CSS 的 table-layout: fixed 發揮作用
+            # 給第一欄 (Operation) 一個稍微小一點的固定寬度比例，其他欄位平分剩下的空間
+            html_out += '<thead><tr><th style="width: 10%;">Operation</th>'
             for col in ordered_phases:
-                html_out += f'<th style="min-width: 150px;">{col}</th>'
+                html_out += f'<th>{col}</th>'
             html_out += '</tr></thead><tbody>'
 
             # ==========================================
