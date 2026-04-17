@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 from datetime import datetime, timedelta, time
-import io # 新增：用於處理記憶體中的 CSV 下載
+import io
 
 st.set_page_config(page_title="ATE Capacity & OEE Analyzer", layout="wide")
 
@@ -81,7 +81,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 🌟 V51 核心修正：將主標題移至最頂層，確保無論有無資料都會顯示
 st.markdown("# 📈 ATE OEE Analyzer")
 
 # ==============================================================================
@@ -151,7 +150,28 @@ def load_data(file):
             return None
     return generate_mock_data()
 
+
+# 🌟 核心修正：檔案變更偵測器 (File Change Detector)
 uploaded_file = st.sidebar.file_uploader("Upload Yield Report", type=["xlsx", "xls", "ods"])
+
+# 取得目前上傳檔案的名稱，如果沒有上傳就是 "mock_data"
+current_file_name = uploaded_file.name if uploaded_file is not None else "mock_data"
+
+# 檢查是否與上次紀錄的檔案不同
+if "last_uploaded_file" not in st.session_state:
+    st.session_state.last_uploaded_file = current_file_name
+
+if st.session_state.last_uploaded_file != current_file_name:
+    # 如果檔案改變了（包含使用者點擊 X 取消上傳），就徹底清空所有與 Program 相關的記憶！
+    if "master_mapping" in st.session_state:
+        del st.session_state["master_mapping"]
+    if "saved_progs" in st.session_state:
+        del st.session_state["saved_progs"]
+    
+    # 更新記憶，讓系統知道現在是新的狀態
+    st.session_state.last_uploaded_file = current_file_name
+
+
 raw_df = load_data(uploaded_file)
 
 if raw_df is None or raw_df.empty:
@@ -171,7 +191,7 @@ st.sidebar.divider()
 main_tabs = st.tabs(["📊 OEE Analyzer", "🧬 Overall Build Yield"])
 
 # ==============================================================================
-# --- 🧬 Tab 2: Overall Build Yield Tracking (包含匯入/匯出 Mapping 功能) ---
+# --- 🧬 Tab 2: Overall Build Yield Tracking ---
 # ==============================================================================
 with main_tabs[1]:
     st.write("")
