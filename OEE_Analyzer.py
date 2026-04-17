@@ -79,6 +79,29 @@ st.markdown("""
         min-height: 32px !important;
         border-radius: 4px !important;
     }
+
+    /* 🌟 新增：HTML Table Styling 用於複合矩陣渲染 */
+    .custom-matrix-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 15px 0;
+        font-size: 15px;
+        font-family: sans-serif;
+    }
+    .custom-matrix-table th {
+        background-color: #f0f2f6;
+        color: #31333F;
+        text-align: center;
+        padding: 10px;
+        border: 1px solid #dee2e6;
+        font-size: 14px;
+    }
+    .custom-matrix-table td {
+        text-align: center;
+        padding: 10px;
+        border: 1px solid #dee2e6;
+        vertical-align: middle;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -411,6 +434,9 @@ with main_tabs[1]:
             if red_threshold >= green_threshold:
                 st.error("Critical threshold must be lower than Healthy threshold.")
 
+        # ==============================================================================
+        # --- 🌟 關鍵修改：複合矩陣渲染 (Yield + TestQty + PassQty) ---
+        # ==============================================================================
         with col_matrix:
             prog_to_build = {p: phase for phase, progs in st.session_state.master_mapping.items() for p in progs}
             build_df = clean_build_df.copy()
@@ -422,7 +448,7 @@ with main_tabs[1]:
             else:
                 st.markdown("#### 📊 Build Evolution Matrix (Testing Yield %)")
                 
-                # 1. 聚合運算：算出每個 OpNo 在每個 Build_Phase 的 T_Qty, P_Qty
+                # 1. 聚合運算：算出 T_Qty 和 P_Qty
                 matrix_sum = build_df.groupby(['OpNo', 'Build_Phase']).agg(
                     T_Qty=('TestQty', 'sum'), 
                     P_Qty=('PassQty', 'sum')
@@ -431,52 +457,59 @@ with main_tabs[1]:
                 # 2. 計算 Yield
                 matrix_sum['Yield'] = np.where(matrix_sum['T_Qty'] > 0, (matrix_sum['P_Qty'] / matrix_sum['T_Qty']) * 100, np.nan)
                 
-                # 3. 為了後續的顏色標記，我們需要一個純 Yield 的 Pivot Table
+                # 3. 建立純數值的 Pivot (用於顏色判斷)
                 pivot_yield_numeric = matrix_sum.pivot(index='OpNo', columns='Build_Phase', values='Yield')
                 
-                # 4. 🌟 核心修改：建立包含 Yield, TestQty, PassQty 的複合字串
+                # 4. 建立 HTML 複合字串
                 def format_cell(row):
                     if pd.isna(row['Yield']):
                         return np.nan
-                    # 將數值格式化，加入千位分號，並使用 HTML 換行與縮小字體
-                    y_str = f"{row['Yield']:.2f}%"
-                    q_str = f"<br><span style='font-size: 11px; color: #666; font-weight: normal;'>(T: {int(row['T_Qty']):,} | P: {int(row['P_Qty']):,})</span>"
+                    y_str = f"<b>{row['Yield']:.2f}%</b>"
+                    q_str = f"<br><span style='font-size: 11px; color: #555; font-weight: normal;'>(T: {int(row['T_Qty']):,} | P: {int(row['P_Qty']):,})</span>"
                     return y_str + q_str
 
                 matrix_sum['Display_Text'] = matrix_sum.apply(format_cell, axis=1)
                 
-                # 5. 將複合字串 Pivot 成本文顯示用的矩陣
+                # 5. 建立文字 Pivot
                 pivot_display = matrix_sum.pivot(index='OpNo', columns='Build_Phase', values='Display_Text')
                 
-                # 確保欄位順序照著 build_phases 走
+                # 排序欄位
                 exist_phases = [p for p in build_phases if p in pivot_display.columns]
                 final_display_matrix = pivot_display[exist_phases]
-                final_numeric_matrix = pivot_yield_numeric[exist_phases] # 用來對應顏色的隱藏矩陣
+                final_numeric_matrix = pivot_yield_numeric[exist_phases]
                 
-                # 6. 顏色套用邏輯 (這裡需要一點 Pandas Style 的進階寫法，因為顯示的跟判斷顏色的矩陣是分開的)
-                def color_yield_matrix(val, numeric_val):
+                # 6. 顏色判定函數
+                def get_color(numeric_val):
                     if pd.isna(numeric_val): return ''
-                    if numeric_val >= green_threshold: color = '#e6f4ea'
-                    elif numeric_val >= red_threshold: color = '#fff3cd'
-                    else: color = '#fdecea'
-                    return f'background-color: {color}; font-weight: bold; color: #333;'
+                    if numeric_val >= green_threshold: return '#e6f4ea'
+                    elif numeric_val >= red_threshold: return '#fff3cd'
+                    else: return '#fdecea'
 
-                # 建立一個 DataFrame 來裝 CSS 字串，形狀必須跟 final_display_matrix 一樣
-                style_df = pd.DataFrame('', index=final_display_matrix.index, columns=final_display_matrix.columns)
+                # 7. 手動構建 HTML 表格以支援多行文字
+                html_out = '<table class="custom-matrix-table">'
+                # 表頭
+                html_out += '<thead><tr><th>OpNo</th>'
                 for col in final_display_matrix.columns:
-                    for idx in final_display_matrix.index:
-                        # 將顯示用的格子，與純數字用的格子送進函數比對
-                        style_df.loc[idx, col] = color_yield_matrix(final_display_matrix.loc[idx, col], final_numeric_matrix.loc[idx, col])
+                    html_out += f'<th>{col}</th>'
+                html_out += '</tr></thead><tbody>'
+                
+                # 內容
+                for index, row in final_display_matrix.iterrows():
+                    html_out += f'<tr><th>{index}</th>'
+                    for col in final_display_matrix.columns:
+                        cell_html = row[col]
+                        num_val = final_numeric_matrix.loc[index, col]
+                        bg_color = get_color(num_val)
+                        
+                        if pd.isna(cell_html):
+                            html_out += f'<td style="background-color: {bg_color};">-</td>'
+                        else:
+                            html_out += f'<td style="background-color: {bg_color};">{cell_html}</td>'
+                    html_out += '</tr>'
+                html_out += '</tbody></table>'
 
-                # 7. 渲染設定 (允許 HTML)
-                styled_matrix = final_display_matrix.style.set_td_classes(style_df).format(na_rep="-").set_properties(**{'text-align': 'center', 'font-size': '15px'}).set_table_styles([
-                    {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#f0f2f6'), ('color', '#31333F'), ('font-size', '14px')]},
-                    {'selector': 'th.row_heading', 'props': [('text-align', 'left'), ('min-width', '200px')]}
-                ])
-
-                # 使用 to_html 讓我們的 <br> 和 <span> 標籤生效
-                st.write(styled_matrix.to_html(escape=False), unsafe_allow_html=True)
-                st.write("") # 加點留白
+                # 8. 輸出 HTML
+                st.write(html_out, unsafe_allow_html=True)
 
 # ==============================================================================
 # --- 📊 Tab 1: OEE Analyzer ---
