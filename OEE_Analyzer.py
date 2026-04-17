@@ -77,21 +77,21 @@ st.markdown("""
         border-radius: 4px !important;
     }
 
-    /* 🌟 選項 B：午夜深藍 (Midnight Navy) */
+    /* 🌟 選項 C：琉璃紫漸層 (Vivid Gradient) */
     div.stButton > button {
-        background-color: #0f172a !important; /* Slate 900 */
+        background: linear-gradient(135deg, #6366f1 0%, #3b82f6 100%) !important; /* Indigo to Blue */
         color: white !important;
         border: none !important;
-        border-radius: 6px !important;
+        border-radius: 8px !important;
         padding: 0.6rem 1.2rem !important;
         font-weight: 600 !important;
         font-size: 15px !important;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2) !important;
+        box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.3) !important;
         transition: all 0.2s ease-in-out !important;
     }
     div.stButton > button:hover {
-        background-color: #1e293b !important; /* Slate 800 */
-        box-shadow: 0 6px 8px -1px rgba(0, 0, 0, 0.3) !important;
+        background: linear-gradient(135deg, #4f46e5 0%, #2563eb 100%) !important;
+        box-shadow: 0 6px 8px -1px rgba(59, 130, 246, 0.4) !important;
         transform: translateY(-1px) !important;
     }
     div.stButton > button:active {
