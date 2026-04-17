@@ -450,33 +450,67 @@ with main_tabs[0]:
     # ==============================================================================
     # --- 1. Main Area: Filters & Help Section ---
     # ==============================================================================
-    with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
+    with st.expander("ℹ️ Help: Formula & Parameter Definitions", expanded=False):
         st.markdown("""
-        This system employs rigorous Industrial Engineering (IE) logic combined with actual production report data to calculate authentic equipment efficiency. Metric definitions are as follows:
+        This system employs rigorous Industrial Engineering (IE) logic combined with actual production report data to calculate authentic equipment capacity and efficiency metrics.
 
-        #### 1. Capacity Metrics (Tester View vs. Product View)
-        * **Test Qty:** Total testing actions performed by the testers across all operations.
-        * **Active Days:** The exact number of hours a tester spent in the "Testing" state (CheckIn to CheckOut), divided by 24 hours.
-        * **Normalized UPD:** Calculated as `Total Qty / Active Days`. This metric converts the actual volume tested over a specific time period into an equivalent 24-hour rate for standardized comparison.
+        #### 1. Core OEE Calculation Formulas
+        Our system utilizes a **Bottom-Up, Lot-based** tracking methodology. The core formulas driving the OEE metrics are defined as follows:
+        
+        * **Active Days:** The actual total time the tester spent executing testing operations.
+        
+          $$ \\text{Active Days} = \\sum (\\text{CheckOutTime} - \\text{CheckInTime}) \\div 24 $$
 
-        #### 2. OEE Breakdown (Availability, Performance, Quality)
-        * **A (Availability):** Measures how often the tester is actually in production.
-          * `Calculation = Active Days / Adjusted Calendar Span Days`.
-          *(Note: Full empty days (gaps ≥ 24h) between lots are automatically deducted to ensure fair analysis when filtering specific programs.)*
-        * **P (Performance):** Measures if the tester is running at theoretical speed when active.
-          * `Theoretical UPH = Theoretical Max UPD / 24`
-          * `Actual UPH = Total Test Qty / Total Active Hours`
-          * `Calculation = Actual UPH / Theoretical UPH`
-        * **Q (Quality):** Testing quality. Includes both First Yield and Final Yield.
-          * `First Yield = Total First Pass Qty / Total Test Qty`
-          * `Final Yield = Total Final Pass Qty / Total Test Qty`
-        * **Overall OEE:**
-          * `Calculation = Availability (A) × Performance (P)`
+        * **Adjusted Span Days:** The continuous calendar time span, excluding major idle gaps (no-lot periods exceeding 24 hours).
+        
+          $$ \\text{Adjusted Span Days} = (\\text{Max CheckOut} - \\text{Min CheckIn}) - (\\text{Idle gaps} \\ge 24h) $$
 
-        #### 3. Capacity Planning Metrics
-        * **Planned Target UPD:** The safety scheduling baseline preset by Planning or Engineering.
-        * **Implied OEE:** `Calculation = Planned Target UPD / Theoretical Max UPD`. Reflects the built-in buffer percentage reserved for setups, maintenance, and re-tests.
-        """)
+        * **Availability (A):** Measures the proportion of time the tester is actively in production during the assigned timeframe.
+        
+          $$ A = \\frac{\\text{Active Days}}{\\text{Adjusted Span Days}} $$
+
+        * **Performance (P):** Measures whether the tester is running at the theoretical speed when active (short stoppages or slow testing will naturally degrade this metric).
+        
+          $$ P = \\frac{(\\text{Total Test Qty} / \\text{Active Days})}{\\text{Theoretical Max UPD}} $$
+
+        * **Avg OEE:** The authentic efficiency multiplier calculated by our system.
+        
+          $$ \\text{Avg OEE} = \\text{Availability (A)} \\times \\text{Performance (P)} $$
+
+        ---
+
+        #### 2. Capacity Planning & Throughput Metrics
+        * **Normalized UPD (Units Per Day):** Converts the actual volume tested over a specific active period into an equivalent 24-hour rate for standardized comparison across different testers.
+        
+          $$ \\text{Normalized UPD} = \\frac{\\text{Total Qty}}{\\text{Active Days}} $$
+
+        * **Planned Target UPD:** The safety scheduling baseline preset by Planning or Engineering departments.
+        
+        * **Implied OEE:** Reflects the built-in buffer percentage reserved for setups, maintenance, and re-tests within the planned schedule.
+        
+          $$ \\text{Implied OEE} = \\frac{\\text{Planned Target UPD}}{\\text{Theoretical Max UPD}} $$
+
+        ---
+
+        #### 3. Methodology Differences: ATE Smart Capacity vs. OSAT MES
+        Understanding the calculation differences between our system and OSAT Daily Reports is crucial for accurate capacity planning.
+
+        | Dimension | Our System (Lot-Based) | Typical OSAT MES (24h-Fixed) |
+        | :--- | :--- | :--- |
+        | **Time Foundation** | Calculates continuous spans based on actual **Lot Check-In/Out**, seamlessly handling cross-midnight lots. | Relies on a fixed **1440-minute daily window**, forcefully cutting lots at midnight, introducing boundary errors. |
+        | **Data Source** | Strictly relies on objective **Machine Logs**, immune to manual reporting delays. | Relies heavily on **Operator Manual Scans** (state codes). Delayed scanning often inflates 'Idle' time. |
+        | **OEE Formula** | $$ A \\times P $$ <br> *(Focuses on True ROI of Equipment)* | $$ \\text{Performance} \\times \\text{Rework Eff.} \\times \\text{D\\_O1\\%} $$ <br> *(Focuses on Shop-floor Management)* |
+
+        **Typical OSAT Sub-Formulas for Reference:**
+        
+        * **Performance (總產出效率):** $$ \\text{Performance} = \\frac{\\text{Test Qty} \\times \\text{Standard Test Time}}{(24\\text{h} - \\text{Idle} - \\text{Other} - \\text{E2}) \\times \\text{Machine Count} \\times 60\\text{mins}} $$
+
+        * **Rework Efficiency (重工效率):** $$ \\text{Rework Efficiency} = \\frac{\\text{Rework Production Time}}{\\text{Total Rework Test Time}} $$
+
+        * **Quality (D_O1%):** $$ \\text{Quality (D\\_O1\\%)} = \\frac{\\text{Pass Qty}}{\\text{Pass Qty} + \\text{Fail Qty}} $$
+
+        **Conclusion:** OSAT reports are designed for shop-floor administrative and human management. Our system's **Avg OEE** reflects the most authentic capacity return and equipment limitations.
+        """, unsafe_allow_html=True)
 
     st.markdown("### 🔍 Data Filters")
 
