@@ -387,7 +387,7 @@ with main_tabs[1]:
                         del st.session_state[k]
                 st.rerun()
 
-            # 🌟 核心功能 2：匯出 Mapping Config
+# 🌟 核心功能 2：匯出 Mapping Config
             st.write("")
             st.divider()
             
@@ -413,186 +413,188 @@ with main_tabs[1]:
                 st.info("Assign some programs first to enable exporting.")
 
         st.write("")
-        col_matrix, col_settings = st.columns([3, 1])
-
+        
         # ==============================================================================
-        # --- 🎨 獨立閾值設定 (Settings Sidebar) ---
+        # --- 🎨 獨立閾值設定 (改為上方 Expander，釋放寬度) ---
         # ==============================================================================
-        with col_settings:
-            st.markdown("#### 🎨 Matrix Thresholds")
+        with st.expander("🎨 Matrix Color Thresholds Settings", expanded=False):
             st.markdown("<p style='font-size: 13px; color: #666;'>Set independent visual alerts for each metric.</p>", unsafe_allow_html=True)
             
-            st.markdown("**🎯 Final Test Yield**")
-            ft_g = st.number_input("🟩 FT Healthy (%)", value=95.0, step=0.5, key="ft_g")
-            ft_r = st.number_input("🟥 FT Critical (%)", value=90.0, step=0.5, key="ft_r")
+            # 使用 3 個 Column 橫向排列三個指標的設定，節省垂直空間
+            t_col1, t_col2, t_col3 = st.columns(3)
             
-            st.markdown("**🛠️ Operation Yield**")
-            op_g = st.number_input("🟩 Op Healthy (%)", value=99.5, step=0.5, key="op_g")
-            op_r = st.number_input("🟥 Op Critical (%)", value=98.0, step=0.5, key="op_r")
+            with t_col1:
+                st.markdown("**🎯 Final Test Yield**")
+                ft_g = st.number_input("🟩 FT Healthy (%)", value=95.0, step=0.5, key="ft_g")
+                ft_r = st.number_input("🟥 FT Critical (%)", value=90.0, step=0.5, key="ft_r")
             
-            st.markdown("**🔍 LS Yield**")
-            ls_g = st.number_input("🟩 LS Healthy (%)", value=99.0, step=0.5, key="ls_g")
-            ls_r = st.number_input("🟥 LS Critical (%)", value=95.0, step=0.5, key="ls_r")
+            with t_col2:
+                st.markdown("**🛠️ Operation Yield**")
+                op_g = st.number_input("🟩 Op Healthy (%)", value=99.5, step=0.5, key="op_g")
+                op_r = st.number_input("🟥 Op Critical (%)", value=98.0, step=0.5, key="op_r")
+            
+            with t_col3:
+                st.markdown("**🔍 LS Yield**")
+                ls_g = st.number_input("🟩 LS Healthy (%)", value=99.0, step=0.5, key="ls_g")
+                ls_r = st.number_input("🟥 LS Critical (%)", value=95.0, step=0.5, key="ls_r")
             
             if ft_r >= ft_g or op_r >= op_g or ls_r >= ls_g:
                 st.error("Critical limits must be lower than Healthy limits.")
 
         # ==============================================================================
-        # --- 🌟 關鍵修改：大一統矩陣 (Unified HTML Matrix) ---
+        # --- 🌟 關鍵修改：大一統矩陣 (Unified HTML Matrix)，獲得 100% 寬度 ---
         # ==============================================================================
-        with col_matrix:
-            prog_to_build = {p: phase for phase, progs in st.session_state.master_mapping.items() for p in progs}
-            build_df = clean_build_df.copy()
-            build_df['Build_Phase'] = build_df['ProgramName'].map(prog_to_build)
-            build_df = build_df.dropna(subset=['Build_Phase'])
+        prog_to_build = {p: phase for phase, progs in st.session_state.master_mapping.items() for p in progs}
+        build_df = clean_build_df.copy()
+        build_df['Build_Phase'] = build_df['ProgramName'].map(prog_to_build)
+        build_df = build_df.dropna(subset=['Build_Phase'])
+        
+        if build_df.empty:
+            st.info("💡 Please assign at least one program to a Build Phase above to generate the Matrix Report.")
+        else:
+            st.markdown("#### 📊 Comprehensive Build Evolution Matrix")
             
-            if build_df.empty:
-                st.info("💡 Please assign at least one program to a Build Phase above to generate the Matrix Report.")
-            else:
-                st.markdown("#### 📊 Comprehensive Build Evolution Matrix")
-                
-                # --- 排序權重函數 ---
-                def get_op_sort_weight(op_name):
-                    op_upper = op_name.upper()
-                    if "FT1" in op_upper: return 1
-                    if "MT1" in op_upper or "SLT" in op_upper: return 2
-                    if "FTA" in op_upper or "FT2" in op_upper: return 3
-                    if "LS" in op_upper: return 4
-                    return 99
-                
-                build_df['Op_Weight'] = build_df['OpNo'].apply(get_op_sort_weight)
-                
-                # --- 分類資料 ---
-                ft_df = build_df[~build_df['OpNo'].str.contains('LS', case=False, na=False)].copy()
-                ls_df = build_df[build_df['OpNo'].str.contains('LS', case=False, na=False)].copy()
-                
-                def get_color(val, g_thresh, r_thresh):
-                    if pd.isna(val): return ''
-                    if val >= g_thresh: return '#e6f4ea'
-                    elif val >= r_thresh: return '#fff3cd'
-                    else: return '#fdecea'
+            # --- 排序權重函數 ---
+            def get_op_sort_weight(op_name):
+                op_upper = op_name.upper()
+                if "FT1" in op_upper: return 1
+                if "MT1" in op_upper or "SLT" in op_upper: return 2
+                if "FTA" in op_upper or "FT2" in op_upper: return 3
+                if "LS" in op_upper: return 4
+                return 99
+            
+            build_df['Op_Weight'] = build_df['OpNo'].apply(get_op_sort_weight)
+            
+            # --- 分類資料 ---
+            ft_df = build_df[~build_df['OpNo'].str.contains('LS', case=False, na=False)].copy()
+            ls_df = build_df[build_df['OpNo'].str.contains('LS', case=False, na=False)].copy()
+            
+            def get_color(val, g_thresh, r_thresh):
+                if pd.isna(val): return ''
+                if val >= g_thresh: return '#e6f4ea'
+                elif val >= r_thresh: return '#fff3cd'
+                else: return '#fdecea'
 
-                # --- 準備 HTML ---
-                # 我們需要找出所有出現過的 Build Phase，作為共用的 Header
-                all_used_phases = build_df['Build_Phase'].unique().tolist()
-                ordered_phases = [p for p in build_phases if p in all_used_phases]
+            # --- 準備 HTML ---
+            all_used_phases = build_df['Build_Phase'].unique().tolist()
+            ordered_phases = [p for p in build_phases if p in all_used_phases]
+            
+            # 加上一個外層容器，並允許水平捲動 (以防欄位真的太多)
+            html_out = '<div style="overflow-x: auto;">'
+            html_out += '<table class="custom-matrix-table">'
+            # 統一表頭
+            html_out += '<thead><tr><th style="min-width: 120px;">Operation</th>'
+            for col in ordered_phases:
+                html_out += f'<th style="min-width: 150px;">{col}</th>'
+            html_out += '</tr></thead><tbody>'
+
+            # ==========================================
+            # 區塊 1: Final Test Yield
+            # ==========================================
+            if not ft_df.empty:
+                html_out += f'<tr><td colspan="{len(ordered_phases) + 1}" style="background-color: #d1ecf1; color: #0c5460; font-weight: bold; text-align: center; padding: 6px;">🎯 Final Test Yield (FT)</td></tr>'
                 
-                html_out = '<table class="custom-matrix-table">'
-                # 統一表頭
-                html_out += '<thead><tr><th style="min-width: 120px;">Operation</th>'
-                for col in ordered_phases:
-                    html_out += f'<th style="min-width: 150px;">{col}</th>'
-                html_out += '</tr></thead><tbody>'
+                ft_sum = ft_df.groupby(['OpNo', 'Build_Phase']).agg(T_Qty=('TestQty', 'sum'), P_Qty=('PassQty', 'sum')).reset_index()
+                ft_sum['Yield'] = np.where(ft_sum['T_Qty'] > 0, (ft_sum['P_Qty'] / ft_sum['T_Qty']) * 100, np.nan)
+                ft_sum['Op_Weight'] = ft_sum['OpNo'].apply(get_op_sort_weight)
+                
+                ordered_ops = ft_sum.sort_values('Op_Weight')['OpNo'].unique().tolist()
+                
+                for op in ordered_ops:
+                    html_out += f'<tr><th>{op}</th>'
+                    op_data = ft_sum[ft_sum['OpNo'] == op]
+                    for phase in ordered_phases:
+                        cell_data = op_data[op_data['Build_Phase'] == phase]
+                        if cell_data.empty or pd.isna(cell_data['Yield'].values[0]):
+                            html_out += '<td>-</td>'
+                        else:
+                            y_val = cell_data['Yield'].values[0]
+                            t_val = int(cell_data['T_Qty'].values[0])
+                            p_val = int(cell_data['P_Qty'].values[0])
+                            bg = get_color(y_val, ft_g, ft_r)
+                            
+                            cell_html = f"<b>{y_val:.2f}%</b><br><span style='font-size: 11px; color: #555; font-weight: normal;'>T: {t_val:,} | P: {p_val:,}</span>"
+                            html_out += f'<td style="background-color: {bg};">{cell_html}</td>'
+                    html_out += '</tr>'
 
-                # ==========================================
-                # 區塊 1: Final Test Yield
-                # ==========================================
-                if not ft_df.empty:
-                    html_out += f'<tr><td colspan="{len(ordered_phases) + 1}" style="background-color: #d1ecf1; color: #0c5460; font-weight: bold; text-align: center; padding: 6px;">🎯 Final Test Yield (FT)</td></tr>'
-                    
-                    ft_sum = ft_df.groupby(['OpNo', 'Build_Phase']).agg(T_Qty=('TestQty', 'sum'), P_Qty=('PassQty', 'sum')).reset_index()
-                    ft_sum['Yield'] = np.where(ft_sum['T_Qty'] > 0, (ft_sum['P_Qty'] / ft_sum['T_Qty']) * 100, np.nan)
-                    ft_sum['Op_Weight'] = ft_sum['OpNo'].apply(get_op_sort_weight)
-                    
-                    # 取出排序後的 OpNo 清單
-                    ordered_ops = ft_sum.sort_values('Op_Weight')['OpNo'].unique().tolist()
-                    
-                    for op in ordered_ops:
-                        html_out += f'<tr><th>{op}</th>'
-                        op_data = ft_sum[ft_sum['OpNo'] == op]
-                        for phase in ordered_phases:
-                            cell_data = op_data[op_data['Build_Phase'] == phase]
-                            if cell_data.empty or pd.isna(cell_data['Yield'].values[0]):
-                                html_out += '<td>-</td>'
-                            else:
-                                y_val = cell_data['Yield'].values[0]
-                                t_val = int(cell_data['T_Qty'].values[0])
-                                p_val = int(cell_data['P_Qty'].values[0])
-                                bg = get_color(y_val, ft_g, ft_r)
-                                
-                                cell_html = f"<b>{y_val:.2f}%</b><br><span style='font-size: 11px; color: #555; font-weight: normal;'>T: {t_val:,} | P: {p_val:,}</span>"
-                                html_out += f'<td style="background-color: {bg};">{cell_html}</td>'
-                        html_out += '</tr>'
+            # ==========================================
+            # 區塊 2: Operation Yield
+            # ==========================================
+            if not ft_df.empty:
+                html_out += f'<tr><td colspan="{len(ordered_phases) + 1}" style="background-color: #e2e3e5; color: #383d41; font-weight: bold; text-align: center; padding: 6px;">🛠️ Operation Yield (Loss Mgt)</td></tr>'
+                
+                for col in ['ScrapQty', 'LossQty', 'OtherQty']:
+                    if col not in ft_df.columns: ft_df[col] = 0
+                
+                op_sum = ft_df.groupby(['OpNo', 'Build_Phase']).agg(
+                    T_Qty=('TestQty', 'sum'),
+                    P_Qty=('PassQty', 'sum'),
+                    Scrap=('ScrapQty', 'sum'),
+                    Loss=('LossQty', 'sum'),
+                    Other=('OtherQty', 'sum'),
+                ).reset_index()
+                
+                op_sum['Op_Weight'] = op_sum['OpNo'].apply(get_op_sort_weight)
+                ordered_ops = op_sum.sort_values('Op_Weight')['OpNo'].unique().tolist()
 
-                # ==========================================
-                # 區塊 2: Operation Yield
-                # ==========================================
-                if not ft_df.empty:
-                    html_out += f'<tr><td colspan="{len(ordered_phases) + 1}" style="background-color: #e2e3e5; color: #383d41; font-weight: bold; text-align: center; padding: 6px;">🛠️ Operation Yield (Loss Mgt)</td></tr>'
-                    
-                    # 假設 Raw Data 有 ScrapQty, LossQty, OtherQty 欄位，沒有的話補 0 以防報錯
-                    for col in ['ScrapQty', 'LossQty', 'OtherQty']:
-                        if col not in ft_df.columns: ft_df[col] = 0
-                    
-                    op_sum = ft_df.groupby(['OpNo', 'Build_Phase']).agg(
-                        T_Qty=('TestQty', 'sum'),
-                        P_Qty=('PassQty', 'sum'),
-                        Scrap=('ScrapQty', 'sum'),
-                        Loss=('LossQty', 'sum'),
-                        Other=('OtherQty', 'sum'),
-                    ).reset_index()
-                    
-                    op_sum['Op_Weight'] = op_sum['OpNo'].apply(get_op_sort_weight)
-                    ordered_ops = op_sum.sort_values('Op_Weight')['OpNo'].unique().tolist()
+                for op in ordered_ops:
+                    html_out += f'<tr><th>{op}</th>'
+                    op_data = op_sum[op_sum['OpNo'] == op]
+                    for phase in ordered_phases:
+                        cell_data = op_data[op_data['Build_Phase'] == phase]
+                        if cell_data.empty or cell_data['T_Qty'].values[0] == 0:
+                            html_out += '<td>-</td>'
+                        else:
+                            t_val = float(cell_data['T_Qty'].values[0])
+                            p_val = float(cell_data['P_Qty'].values[0])
+                            
+                            total_loss_val = float(cell_data['Scrap'].values[0] + cell_data['Loss'].values[0] + cell_data['Other'].values[0])
+                            mock_fail_loss = total_loss_val * 0.3 
+                            net_loss = max(0, total_loss_val - mock_fail_loss)
+                            
+                            op_y_val = (1 - (net_loss / t_val)) * 100 if t_val > 0 else 0
+                            bg = get_color(op_y_val, op_g, op_r)
+                            
+                            pre_l = int(net_loss * 0.4)
+                            post_l = int(net_loss * 0.6)
+                            f_l = int(mock_fail_loss)
+                            
+                            cell_html = f"<b>{op_y_val:.2f}%</b><br><div style='font-size: 11px; color: #555; line-height: 1.3;'>Op Loss: {int(net_loss)}<br>(Pre: {pre_l} | Post: {post_l})<br>Fail Loss: {f_l}</div>"
+                            html_out += f'<td style="background-color: {bg};">{cell_html}</td>'
+                    html_out += '</tr>'
 
-                    for op in ordered_ops:
-                        html_out += f'<tr><th>{op}</th>'
-                        op_data = op_sum[op_sum['OpNo'] == op]
-                        for phase in ordered_phases:
-                            cell_data = op_data[op_data['Build_Phase'] == phase]
-                            if cell_data.empty or cell_data['T_Qty'].values[0] == 0:
-                                html_out += '<td>-</td>'
-                            else:
-                                t_val = float(cell_data['T_Qty'].values[0])
-                                p_val = float(cell_data['P_Qty'].values[0])
-                                
-                                # 在沒有真實詳細欄位時的模擬計算，保證版面渲染不會報錯
-                                total_loss_val = float(cell_data['Scrap'].values[0] + cell_data['Loss'].values[0] + cell_data['Other'].values[0])
-                                mock_fail_loss = total_loss_val * 0.3 # 模擬 30% 來自 Fail
-                                net_loss = max(0, total_loss_val - mock_fail_loss)
-                                
-                                op_y_val = (1 - (net_loss / t_val)) * 100 if t_val > 0 else 0
-                                bg = get_color(op_y_val, op_g, op_r)
-                                
-                                pre_l = int(net_loss * 0.4)
-                                post_l = int(net_loss * 0.6)
-                                f_l = int(mock_fail_loss)
-                                
-                                cell_html = f"<b>{op_y_val:.2f}%</b><br><div style='font-size: 11px; color: #555; line-height: 1.3;'>Op Loss: {int(net_loss)}<br>(Pre: {pre_l} | Post: {post_l})<br>Fail Loss: {f_l}</div>"
-                                html_out += f'<td style="background-color: {bg};">{cell_html}</td>'
-                        html_out += '</tr>'
+            # ==========================================
+            # 區塊 3: Lead Scan Yield
+            # ==========================================
+            if not ls_df.empty:
+                html_out += f'<tr><td colspan="{len(ordered_phases) + 1}" style="background-color: #d4edda; color: #155724; font-weight: bold; text-align: center; padding: 6px;">🔍 Lead Scan Yield (LS)</td></tr>'
+                
+                ls_sum = ls_df.groupby(['OpNo', 'Build_Phase']).agg(T_Qty=('TestQty', 'sum'), P_Qty=('PassQty', 'sum')).reset_index()
+                ls_sum['Yield'] = np.where(ls_sum['T_Qty'] > 0, (ls_sum['P_Qty'] / ls_sum['T_Qty']) * 100, np.nan)
+                ls_sum['Op_Weight'] = ls_sum['OpNo'].apply(get_op_sort_weight)
+                
+                ordered_ops_ls = ls_sum.sort_values('Op_Weight')['OpNo'].unique().tolist()
+                
+                for op in ordered_ops_ls:
+                    html_out += f'<tr><th>{op}</th>'
+                    op_data = ls_sum[ls_sum['OpNo'] == op]
+                    for phase in ordered_phases:
+                        cell_data = op_data[op_data['Build_Phase'] == phase]
+                        if cell_data.empty or pd.isna(cell_data['Yield'].values[0]):
+                            html_out += '<td>-</td>'
+                        else:
+                            y_val = cell_data['Yield'].values[0]
+                            t_val = int(cell_data['T_Qty'].values[0])
+                            p_val = int(cell_data['P_Qty'].values[0])
+                            bg = get_color(y_val, ls_g, ls_r)
+                            
+                            cell_html = f"<b>{y_val:.2f}%</b><br><span style='font-size: 11px; color: #555; font-weight: normal;'>T: {t_val:,} | P: {p_val:,}</span>"
+                            html_out += f'<td style="background-color: {bg};">{cell_html}</td>'
+                    html_out += '</tr>'
+                    
+            html_out += '</tbody></table></div>'
+            st.write(html_out, unsafe_allow_html=True)
 
-                # ==========================================
-                # 區塊 3: Lead Scan Yield
-                # ==========================================
-                if not ls_df.empty:
-                    html_out += f'<tr><td colspan="{len(ordered_phases) + 1}" style="background-color: #d4edda; color: #155724; font-weight: bold; text-align: center; padding: 6px;">🔍 Lead Scan Yield (LS)</td></tr>'
-                    
-                    ls_sum = ls_df.groupby(['OpNo', 'Build_Phase']).agg(T_Qty=('TestQty', 'sum'), P_Qty=('PassQty', 'sum')).reset_index()
-                    ls_sum['Yield'] = np.where(ls_sum['T_Qty'] > 0, (ls_sum['P_Qty'] / ls_sum['T_Qty']) * 100, np.nan)
-                    ls_sum['Op_Weight'] = ls_sum['OpNo'].apply(get_op_sort_weight)
-                    
-                    ordered_ops_ls = ls_sum.sort_values('Op_Weight')['OpNo'].unique().tolist()
-                    
-                    for op in ordered_ops_ls:
-                        html_out += f'<tr><th>{op}</th>'
-                        op_data = ls_sum[ls_sum['OpNo'] == op]
-                        for phase in ordered_phases:
-                            cell_data = op_data[op_data['Build_Phase'] == phase]
-                            if cell_data.empty or pd.isna(cell_data['Yield'].values[0]):
-                                html_out += '<td>-</td>'
-                            else:
-                                y_val = cell_data['Yield'].values[0]
-                                t_val = int(cell_data['T_Qty'].values[0])
-                                p_val = int(cell_data['P_Qty'].values[0])
-                                bg = get_color(y_val, ls_g, ls_r)
-                                
-                                cell_html = f"<b>{y_val:.2f}%</b><br><span style='font-size: 11px; color: #555; font-weight: normal;'>T: {t_val:,} | P: {p_val:,}</span>"
-                                html_out += f'<td style="background-color: {bg};">{cell_html}</td>'
-                        html_out += '</tr>'
-                        
-                html_out += '</tbody></table>'
-                st.write(html_out, unsafe_allow_html=True)
 
 # ==============================================================================
 # --- 📊 Tab 1: OEE Analyzer ---
