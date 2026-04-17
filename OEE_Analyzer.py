@@ -434,8 +434,8 @@ with main_tabs[1]:
             if red_threshold >= green_threshold:
                 st.error("Critical threshold must be lower than Healthy threshold.")
 
-        # ==============================================================================
-        # --- 🌟 關鍵修改：複合矩陣渲染 (Yield + TestQty + PassQty) ---
+# ==============================================================================
+        # --- 🌟 關鍵修改：垂直排版的複合矩陣與自訂站點排序 ---
         # ==============================================================================
         with col_matrix:
             prog_to_build = {p: phase for phase, progs in st.session_state.master_mapping.items() for p in progs}
@@ -454,38 +454,64 @@ with main_tabs[1]:
                     P_Qty=('PassQty', 'sum')
                 ).reset_index()
                 
-                # 2. 計算 Yield
+                # 2. 🌟 核心修改：自訂 OpNo 的排序權重
+                # 定義站點的順序：FT1 優先，再來是 MT1/SLT 類，最後是 FTA/FT2 類
+                def get_op_sort_weight(op_name):
+                    op_upper = op_name.upper()
+                    if "FT1" in op_upper: return 1
+                    if "MT1" in op_upper or "SLT" in op_upper: return 2
+                    if "FTA" in op_upper or "FT2" in op_upper: return 3
+                    return 99 # 其他未知的放在最後
+                
+                matrix_sum['Op_Weight'] = matrix_sum['OpNo'].apply(get_op_sort_weight)
+                
+                # 3. 計算 Yield
                 matrix_sum['Yield'] = np.where(matrix_sum['T_Qty'] > 0, (matrix_sum['P_Qty'] / matrix_sum['T_Qty']) * 100, np.nan)
                 
-                # 3. 建立純數值的 Pivot (用於顏色判斷)
-                pivot_yield_numeric = matrix_sum.pivot(index='OpNo', columns='Build_Phase', values='Yield')
+                # 先依照權重排序，確保 Pivot 時的 Index 順序正確
+                matrix_sum = matrix_sum.sort_values('Op_Weight')
                 
-                # 4. 建立 HTML 複合字串
+                # 4. 建立純數值的 Pivot (用於顏色判斷)
+                # pivot_table 預設會重排 index，我們必須重設它的順序
+                pivot_yield_numeric = matrix_sum.pivot_table(index='OpNo', columns='Build_Phase', values='Yield', aggfunc='first')
+                # 利用先前的排序結果，強制重新排列 Index
+                ordered_ops = matrix_sum['OpNo'].drop_duplicates().tolist()
+                pivot_yield_numeric = pivot_yield_numeric.reindex(ordered_ops)
+                
+                # 5. 🌟 核心修改：垂直排版的 HTML 複合字串
                 def format_cell(row):
                     if pd.isna(row['Yield']):
                         return np.nan
+                    # 將原本的 (T: ... | P: ...) 改為 T: ... <br> P: ...
                     y_str = f"<b>{row['Yield']:.2f}%</b>"
-                    q_str = f"<br><span style='font-size: 11px; color: #555; font-weight: normal;'>(T: {int(row['T_Qty']):,} | P: {int(row['P_Qty']):,})</span>"
+                    # 用一個 div 包起來，設定行高，讓數字看起來緊湊但不擁擠
+                    q_str = f"""
+                    <div style='font-size: 11px; color: #555; font-weight: normal; margin-top: 4px; line-height: 1.3;'>
+                        T: {int(row['T_Qty']):,}<br>
+                        P: {int(row['P_Qty']):,}
+                    </div>
+                    """
                     return y_str + q_str
 
                 matrix_sum['Display_Text'] = matrix_sum.apply(format_cell, axis=1)
                 
-                # 5. 建立文字 Pivot
-                pivot_display = matrix_sum.pivot(index='OpNo', columns='Build_Phase', values='Display_Text')
+                # 6. 建立文字 Pivot
+                pivot_display = matrix_sum.pivot_table(index='OpNo', columns='Build_Phase', values='Display_Text', aggfunc='first')
+                pivot_display = pivot_display.reindex(ordered_ops) # 強制套用自訂排序
                 
                 # 排序欄位
                 exist_phases = [p for p in build_phases if p in pivot_display.columns]
                 final_display_matrix = pivot_display[exist_phases]
                 final_numeric_matrix = pivot_yield_numeric[exist_phases]
                 
-                # 6. 顏色判定函數
+                # 7. 顏色判定函數
                 def get_color(numeric_val):
                     if pd.isna(numeric_val): return ''
                     if numeric_val >= green_threshold: return '#e6f4ea'
                     elif numeric_val >= red_threshold: return '#fff3cd'
                     else: return '#fdecea'
 
-                # 7. 手動構建 HTML 表格以支援多行文字
+                # 8. 手動構建 HTML 表格以支援多行文字
                 html_out = '<table class="custom-matrix-table">'
                 # 表頭
                 html_out += '<thead><tr><th>OpNo</th>'
@@ -508,7 +534,7 @@ with main_tabs[1]:
                     html_out += '</tr>'
                 html_out += '</tbody></table>'
 
-                # 8. 輸出 HTML
+                # 9. 輸出 HTML
                 st.write(html_out, unsafe_allow_html=True)
 
 # ==============================================================================
