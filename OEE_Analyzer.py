@@ -163,14 +163,13 @@ st.sidebar.header("⚙️ Data Cleaning Rules")
 min_lot_size = st.sidebar.number_input("Exclude Lots smaller than (Qty)", value=0, step=100)
 st.sidebar.divider()
 
-
 # ==============================================================================
 # --- 🌟 V53 頂層架構切分 (Main Tabs) ---
 # ==============================================================================
 main_tabs = st.tabs(["📊 OEE Analyzer", "🧬 Overall Build Yield"])
 
 # ==============================================================================
-# --- 🧬 Tab 2: Overall Build Yield Tracking ---
+# --- 🧬 Tab 2: Overall Build Yield Tracking (強化狀態管理版) ---
 # 巧妙設計：在這裡先執行並渲染 Tab 2，因為它不需要後續 OEE 的 Filter，
 # 這樣就算後面的 OEE 觸發了 st.stop()，這個 Tab 依然能活著！
 # ==============================================================================
@@ -200,6 +199,13 @@ with main_tabs[1]:
                 elif "PVT" in p_u: st.session_state.build_mapping["PVT"].append(p)
                 elif "MP" in p_u: st.session_state.build_mapping["MP"].append(p)
 
+        # 🌟 修復 1：強制狀態同步器 (State Synchronizer)
+        # 確保 Widget 的實際選擇結果，能精準回傳到背景的 Mapping 記憶體中，防止選項消失
+        for phase in build_phases:
+            widget_key = f"map_{phase}"
+            if widget_key in st.session_state:
+                st.session_state.build_mapping[phase] = st.session_state[widget_key]
+
         assigned_progs = [p for progs in st.session_state.build_mapping.values() for p in progs]
         unassigned_pool = [p for p in all_programs if p not in assigned_progs]
         
@@ -218,7 +224,14 @@ with main_tabs[1]:
                 with all_cols[i]:
                     curr_selected = [p for p in st.session_state.build_mapping[phase] if p in all_programs]
                     options = sorted(list(set(curr_selected + unassigned_pool)))
-                    st.session_state.build_mapping[phase] = st.multiselect(f"📍 {phase}", options=options, default=curr_selected, key=f"map_{phase}")
+                    
+                    # 🌟 修復 1：僅使用 key 來自動追蹤狀態，不再覆寫變數，徹底解決閃退問題
+                    st.multiselect(
+                        f"📍 {phase}", 
+                        options=options, 
+                        default=curr_selected, 
+                        key=f"map_{phase}"
+                    )
 
         prog_to_build = {p: phase for phase, progs in st.session_state.build_mapping.items() for p in progs}
         build_df = clean_build_df.copy()
@@ -228,23 +241,16 @@ with main_tabs[1]:
         if build_df.empty:
             st.info("💡 Please assign at least one program to a Build Phase above to generate the Matrix Report.")
         else:
-            st.markdown("### 📊 Build Evolution Matrix (Testing Yield %)")
-            st.caption("Note: 'MBU Test CUM yield' is calculated by multiplying the Testing Yield of all listed operations within that phase.")
+            st.markdown("#### 📊 Build Evolution Matrix (Testing Yield %)")
             
             matrix_sum = build_df.groupby(['OpNo', 'Build_Phase']).agg(T_Qty=('TestQty', 'sum'), P_Qty=('PassQty', 'sum')).reset_index()
             matrix_sum['Yield'] = np.where(matrix_sum['T_Qty'] > 0, (matrix_sum['P_Qty'] / matrix_sum['T_Qty']) * 100, np.nan)
             pivot_yield = matrix_sum.pivot(index='OpNo', columns='Build_Phase', values='Yield')
             
             exist_phases = [p for p in build_phases if p in pivot_yield.columns]
-            pivot_yield = pivot_yield[exist_phases]
             
-            cum_yields = {}
-            for col in pivot_yield.columns:
-                col_yields = pivot_yield[col].dropna() / 100.0
-                cum_yields[col] = col_yields.prod() * 100.0 if not col_yields.empty else np.nan
-                    
-            cum_row = pd.DataFrame([cum_yields], index=['MBU Test CUM yield'])
-            final_matrix = pd.concat([cum_row, pivot_yield])
+            # 🌟 修復 2：移除 CUM Yield 的計算，直接顯示最純粹的站點良率矩陣
+            final_matrix = pivot_yield[exist_phases]
             
             def color_yield_matrix(val):
                 if pd.isna(val): return ''
@@ -258,9 +264,8 @@ with main_tabs[1]:
 
             st.dataframe(styled_matrix, use_container_width=True)
 
-
 # ==============================================================================
-# --- 📊 Tab 1: OEE Analyzer (您的原始代碼，原汁原味包覆在此) ---
+# --- 📊 Tab 1: OEE Analyzer (完全無改動區塊) ---
 # ==============================================================================
 with main_tabs[0]:
     # ==============================================================================
