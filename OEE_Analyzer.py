@@ -141,17 +141,28 @@ def generate_mock_data():
         test_duration = timedelta(hours=np.random.uniform(6, 14))
         end_time = start_time + test_duration
         
-        qty = np.random.randint(3000, 8000)
-        first_yield_rate = np.random.uniform(0.85, 0.95)
-        final_yield_rate = np.random.uniform(first_yield_rate, 0.99)
+        # 精確產生符合情境邏輯的整數資料
+        qty = np.random.randint(3000, 8000) # TestQty (MES In)
+        input_loss = np.random.randint(0, 10)
+        test_in_qty = qty - input_loss
         
-        first_pass_qty = int(qty * first_yield_rate)
-        pass_qty = int(qty * final_yield_rate)
+        pass_loss = np.random.randint(0, 15)
+        pass_qty_real = int(test_in_qty * np.random.uniform(0.85, 0.99))
+        test_out_qty = pass_qty_real + pass_loss
+        pass_qty = pass_qty_real
         
-        data.append([f"LOT_{i:04d}", prod, op, prog, tester, start_time, end_time, qty, first_pass_qty, pass_qty])
+        fail_loss = np.random.randint(0, 5)
+        fail_qty = test_in_qty - test_out_qty - fail_loss
+        
+        # 防呆
+        if fail_qty < 0: fail_qty = 0
+        
+        first_pass_qty = int(pass_qty * np.random.uniform(0.95, 1.0))
+        
+        data.append([f"LOT_{i:04d}", prod, op, prog, tester, start_time, end_time, qty, first_pass_qty, pass_qty, test_in_qty, test_out_qty, fail_qty])
         tester_clocks[tester] = end_time
         
-    return pd.DataFrame(data, columns=['LotNo', 'ProductNo', 'OpNo', 'ProgramName', 'Tester', 'CheckInTime', 'CheckOutTime', 'TestQty', 'First Pass Qty', 'PassQty'])
+    return pd.DataFrame(data, columns=['LotNo', 'ProductNo', 'OpNo', 'ProgramName', 'Tester', 'CheckInTime', 'CheckOutTime', 'TestQty', 'First Pass Qty', 'PassQty', 'TestInQty', 'TestOutQty', 'FailQty'])
 
 def load_data(file):
     if file is not None:
@@ -170,6 +181,16 @@ def load_data(file):
                  
             if 'ProductNo' not in df.columns:
                 df['ProductNo'] = "Unknown_Product"
+                
+            # 確保新欄位存在，若無則用預設值填補以免報錯
+            if 'TestInQty' not in df.columns: df['TestInQty'] = df['TestQty']
+            if 'TestOutQty' not in df.columns: df['TestOutQty'] = df['PassQty']
+            if 'FailQty' not in df.columns: df['FailQty'] = df['TestQty'] - df['PassQty']
+            
+            df['TestInQty'] = pd.to_numeric(df['TestInQty'], errors='coerce').fillna(df['TestQty'])
+            df['TestOutQty'] = pd.to_numeric(df['TestOutQty'], errors='coerce').fillna(df['PassQty'])
+            df['FailQty'] = pd.to_numeric(df['FailQty'], errors='coerce').fillna(df['TestQty'] - df['PassQty'])
+            
             return df
         except Exception as e:
             st.error(f"Failed to load file. Error: {str(e)}")
@@ -417,12 +438,11 @@ with main_tabs[1]:
         st.write("")
         
         # ==============================================================================
-        # --- 🎨 獨立閾值設定 (改為上方 Expander，釋放寬度) ---
+        # --- 🎨 獨立閾值設定 ---
         # ==============================================================================
         with st.expander("🎨 Matrix Color Thresholds Settings", expanded=False):
             st.markdown("<p style='font-size: 13px; color: #666;'>Set independent visual alerts for each metric.</p>", unsafe_allow_html=True)
             
-            # 使用 3 個 Column 橫向排列三個指標的設定，節省垂直空間
             t_col1, t_col2, t_col3 = st.columns(3)
             
             with t_col1:
@@ -444,7 +464,7 @@ with main_tabs[1]:
                 st.error("Critical limits must be lower than Healthy limits.")
 
         # ==============================================================================
-        # --- 🌟 關鍵修改：大一統矩陣 (Unified HTML Matrix)，獲得 100% 寬度 ---
+        # --- 🌟 關鍵修改：大一統矩陣 (Unified HTML Matrix) ---
         # ==============================================================================
         prog_to_build = {p: phase for phase, progs in st.session_state.master_mapping.items() for p in progs}
         build_df = clean_build_df.copy()
@@ -471,31 +491,36 @@ with main_tabs[1]:
             ft_df = build_df[~build_df['OpNo'].str.contains('LS', case=False, na=False)].copy()
             ls_df = build_df[build_df['OpNo'].str.contains('LS', case=False, na=False)].copy()
             
-            def get_color(val, g_thresh, r_thresh):
+            # 動態背景色判定
+            def get_bg_color(val, g_thresh, r_thresh):
                 if pd.isna(val): return ''
                 if val >= g_thresh: return '#e6f4ea'
                 elif val >= r_thresh: return '#fff3cd'
                 else: return '#fdecea'
+            
+            # 🌟 新增：動態文字顏色判定 (Critical 變深紅)
+            def get_text_color(val, r_thresh):
+                if pd.isna(val): return '#333333'
+                return '#d32f2f' if val < r_thresh else '#333333'
 
-            # --- 準備 HTML ---
             all_used_phases = build_df['Build_Phase'].unique().tolist()
             ordered_phases = [p for p in build_phases if p in all_used_phases]
             
-            # 使用 width: 100% 讓其響應式縮放
             html_out = '<div style="width: 100%;">'
             html_out += '<table class="custom-matrix-table">'
-            # 統一表頭，移除 min-width 限制，讓 CSS 的 table-layout: fixed 發揮作用
-            # 給第一欄 (Operation) 一個稍微小一點的固定寬度比例，其他欄位平分剩下的空間
             html_out += '<thead><tr><th style="width: 10%;">Operation</th>'
             for col in ordered_phases:
                 html_out += f'<th>{col}</th>'
             html_out += '</tr></thead><tbody>'
 
+            # 🌟 現代風格大標題 CSS
+            modern_header_style = "background-color: #f1f5f9; color: #111827; font-weight: 800; font-size: 15px; text-align: center; padding: 12px; border-top: 2px solid #9ca3af; border-bottom: 2px solid #9ca3af; letter-spacing: 0.5px;"
+
             # ==========================================
-            # 區塊 1: Final Test Yield
+            # 區塊 1: Test Yield
             # ==========================================
             if not ft_df.empty:
-                html_out += f'<tr><td colspan="{len(ordered_phases) + 1}" style="background-color: #d1ecf1; color: #0c5460; font-weight: bold; text-align: center; padding: 6px;">🎯 Final Test Yield (FT)</td></tr>'
+                html_out += f'<tr><td colspan="{len(ordered_phases) + 1}" style="{modern_header_style}">Test Yield</td></tr>'
                 
                 ft_sum = ft_df.groupby(['OpNo', 'Build_Phase']).agg(T_Qty=('TestQty', 'sum'), P_Qty=('PassQty', 'sum')).reset_index()
                 ft_sum['Yield'] = np.where(ft_sum['T_Qty'] > 0, (ft_sum['P_Qty'] / ft_sum['T_Qty']) * 100, np.nan)
@@ -514,9 +539,11 @@ with main_tabs[1]:
                             y_val = cell_data['Yield'].values[0]
                             t_val = int(cell_data['T_Qty'].values[0])
                             p_val = int(cell_data['P_Qty'].values[0])
-                            bg = get_color(y_val, ft_g, ft_r)
                             
-                            cell_html = f"<b>{y_val:.2f}%</b><br><span style='font-size: 11px; color: #555; font-weight: normal;'>T: {t_val:,} | P: {p_val:,}</span>"
+                            bg = get_bg_color(y_val, ft_g, ft_r)
+                            txt_c = get_text_color(y_val, ft_r)
+                            
+                            cell_html = f"<div style='color: {txt_c};'><b>{y_val:.2f}%</b><br><span style='font-size: 11px; font-weight: normal;'>T: {t_val:,} | P: {p_val:,}</span></div>"
                             html_out += f'<td style="background-color: {bg};">{cell_html}</td>'
                     html_out += '</tr>'
 
@@ -524,17 +551,14 @@ with main_tabs[1]:
             # 區塊 2: Operation Yield
             # ==========================================
             if not ft_df.empty:
-                html_out += f'<tr><td colspan="{len(ordered_phases) + 1}" style="background-color: #e2e3e5; color: #383d41; font-weight: bold; text-align: center; padding: 6px;">🛠️ Operation Yield (Loss Mgt)</td></tr>'
-                
-                for col in ['ScrapQty', 'LossQty', 'OtherQty']:
-                    if col not in ft_df.columns: ft_df[col] = 0
+                html_out += f'<tr><td colspan="{len(ordered_phases) + 1}" style="{modern_header_style}">Operation Yield</td></tr>'
                 
                 op_sum = ft_df.groupby(['OpNo', 'Build_Phase']).agg(
                     T_Qty=('TestQty', 'sum'),
+                    T_In_Qty=('TestInQty', 'sum'),
+                    T_Out_Qty=('TestOutQty', 'sum'),
                     P_Qty=('PassQty', 'sum'),
-                    Scrap=('ScrapQty', 'sum'),
-                    Loss=('LossQty', 'sum'),
-                    Other=('OtherQty', 'sum'),
+                    F_Qty=('FailQty', 'sum')
                 ).reset_index()
                 
                 op_sum['Op_Weight'] = op_sum['OpNo'].apply(get_op_sort_weight)
@@ -548,21 +572,24 @@ with main_tabs[1]:
                         if cell_data.empty or cell_data['T_Qty'].values[0] == 0:
                             html_out += '<td>-</td>'
                         else:
-                            t_val = float(cell_data['T_Qty'].values[0])
-                            p_val = float(cell_data['P_Qty'].values[0])
+                            t_qty = float(cell_data['T_Qty'].values[0])
+                            t_in_qty = float(cell_data['T_In_Qty'].values[0])
+                            t_out_qty = float(cell_data['T_Out_Qty'].values[0])
+                            p_qty = float(cell_data['P_Qty'].values[0])
+                            f_qty = float(cell_data['F_Qty'].values[0])
                             
-                            total_loss_val = float(cell_data['Scrap'].values[0] + cell_data['Loss'].values[0] + cell_data['Other'].values[0])
-                            mock_fail_loss = total_loss_val * 0.3 
-                            net_loss = max(0, total_loss_val - mock_fail_loss)
+                            # 🌟 精確的整數運算邏輯，絕無小數點進位誤差
+                            input_loss = max(0, int(t_qty - t_in_qty))
+                            pass_loss = max(0, int(t_out_qty - p_qty))
+                            fail_loss = max(0, int(t_in_qty - t_out_qty - f_qty))
                             
-                            op_y_val = (1 - (net_loss / t_val)) * 100 if t_val > 0 else 0
-                            bg = get_color(op_y_val, op_g, op_r)
+                            op_loss = input_loss + pass_loss
+                            op_y_val = (1 - (op_loss / t_qty)) * 100 if t_qty > 0 else 0
                             
-                            pre_l = int(net_loss * 0.4)
-                            post_l = int(net_loss * 0.6)
-                            f_l = int(mock_fail_loss)
+                            bg = get_bg_color(op_y_val, op_g, op_r)
+                            txt_c = get_text_color(op_y_val, op_r)
                             
-                            cell_html = f"<b>{op_y_val:.2f}%</b><br><div style='font-size: 11px; color: #555; line-height: 1.3;'>Op Loss: {int(net_loss)}<br>(Pre: {pre_l} | Post: {post_l})<br>Fail Loss: {f_l}</div>"
+                            cell_html = f"<div style='color: {txt_c};'><b>{op_y_val:.2f}%</b><br><div style='font-size: 11px; line-height: 1.3;'>OP Loss: {op_loss:,}<br>(Input: {input_loss:,} | Pass: {pass_loss:,})<br>Fail Loss: {fail_loss:,}</div></div>"
                             html_out += f'<td style="background-color: {bg};">{cell_html}</td>'
                     html_out += '</tr>'
 
@@ -570,7 +597,7 @@ with main_tabs[1]:
             # 區塊 3: Lead Scan Yield
             # ==========================================
             if not ls_df.empty:
-                html_out += f'<tr><td colspan="{len(ordered_phases) + 1}" style="background-color: #d4edda; color: #155724; font-weight: bold; text-align: center; padding: 6px;">🔍 Lead Scan Yield (LS)</td></tr>'
+                html_out += f'<tr><td colspan="{len(ordered_phases) + 1}" style="{modern_header_style}">LS Yield</td></tr>'
                 
                 ls_sum = ls_df.groupby(['OpNo', 'Build_Phase']).agg(T_Qty=('TestQty', 'sum'), P_Qty=('PassQty', 'sum')).reset_index()
                 ls_sum['Yield'] = np.where(ls_sum['T_Qty'] > 0, (ls_sum['P_Qty'] / ls_sum['T_Qty']) * 100, np.nan)
@@ -589,9 +616,11 @@ with main_tabs[1]:
                             y_val = cell_data['Yield'].values[0]
                             t_val = int(cell_data['T_Qty'].values[0])
                             p_val = int(cell_data['P_Qty'].values[0])
-                            bg = get_color(y_val, ls_g, ls_r)
                             
-                            cell_html = f"<b>{y_val:.2f}%</b><br><span style='font-size: 11px; color: #555; font-weight: normal;'>T: {t_val:,} | P: {p_val:,}</span>"
+                            bg = get_bg_color(y_val, ls_g, ls_r)
+                            txt_c = get_text_color(y_val, ls_r)
+                            
+                            cell_html = f"<div style='color: {txt_c};'><b>{y_val:.2f}%</b><br><span style='font-size: 11px; font-weight: normal;'>T: {t_val:,} | P: {p_val:,}</span></div>"
                             html_out += f'<td style="background-color: {bg};">{cell_html}</td>'
                     html_out += '</tr>'
                     
