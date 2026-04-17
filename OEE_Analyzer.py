@@ -77,21 +77,21 @@ st.markdown("""
         border-radius: 4px !important;
     }
 
-    /* 🌟 選項 C：琉璃紫漸層 (Vivid Gradient) */
+    /* 🌟 選項 A：科技湛藍 (Tech Blue) */
     div.stButton > button {
-        background: linear-gradient(135deg, #6366f1 0%, #3b82f6 100%) !important; /* Indigo to Blue */
+        background-color: #0ea5e9 !important; /* Sky 500 */
         color: white !important;
         border: none !important;
         border-radius: 8px !important;
         padding: 0.6rem 1.2rem !important;
         font-weight: 600 !important;
         font-size: 15px !important;
-        box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.3) !important;
+        box-shadow: 0 4px 6px -1px rgba(14, 165, 233, 0.3), 0 2px 4px -1px rgba(14, 165, 233, 0.2) !important;
         transition: all 0.2s ease-in-out !important;
     }
     div.stButton > button:hover {
-        background: linear-gradient(135deg, #4f46e5 0%, #2563eb 100%) !important;
-        box-shadow: 0 6px 8px -1px rgba(59, 130, 246, 0.4) !important;
+        background-color: #0284c7 !important; /* Sky 600 */
+        box-shadow: 0 6px 8px -1px rgba(14, 165, 233, 0.4), 0 4px 6px -1px rgba(14, 165, 233, 0.3) !important;
         transform: translateY(-1px) !important;
     }
     div.stButton > button:active {
