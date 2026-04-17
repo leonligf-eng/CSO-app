@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 from datetime import datetime, timedelta, time
+import io # 新增：用於處理記憶體中的 CSV 下載
 
 st.set_page_config(page_title="ATE Capacity & OEE Analyzer", layout="wide")
 
@@ -170,7 +171,7 @@ st.sidebar.divider()
 main_tabs = st.tabs(["📊 OEE Analyzer", "🧬 Overall Build Yield"])
 
 # ==============================================================================
-# --- 🧬 Tab 2: Overall Build Yield Tracking (包含自訂良率門檻) ---
+# --- 🧬 Tab 2: Overall Build Yield Tracking (包含匯入/匯出 Mapping 功能) ---
 # ==============================================================================
 with main_tabs[1]:
     st.write("")
@@ -199,6 +200,35 @@ with main_tabs[1]:
                 elif "DVT" in p_u: st.session_state.master_mapping["DVT"].append(p)
                 elif "PVT" in p_u: st.session_state.master_mapping["PVT"].append(p)
                 elif "MP" in p_u: st.session_state.master_mapping["MP"].append(p)
+
+        # 🌟 核心功能 1：匯入 Mapping Config
+        with st.expander("📥 Import Saved Mapping Configuration", expanded=False):
+            st.markdown("<p style='font-size: 13px; color: #666;'>Upload a previously exported mapping CSV file to restore your program classifications instantly.</p>", unsafe_allow_html=True)
+            uploaded_mapping = st.file_uploader("Upload build_mapping_config.csv", type=['csv'], key="mapping_uploader")
+            
+            if uploaded_mapping is not None:
+                try:
+                    # 讀取 CSV
+                    mapping_df = pd.read_csv(uploaded_mapping)
+                    if 'ProgramName' in mapping_df.columns and 'Build_Phase' in mapping_df.columns:
+                        # 清空現有狀態，避免舊資料殘留
+                        new_mapping = {phase: [] for phase in build_phases}
+                        # 依照上傳的設定重新指派
+                        for _, row in mapping_df.iterrows():
+                            prog = row['ProgramName']
+                            phase = row['Build_Phase']
+                            if phase in new_mapping and prog in all_programs:
+                                new_mapping[phase].append(prog)
+                        
+                        # 如果上傳成功，更新總帳本
+                        if st.button("Apply Imported Mapping", type="primary"):
+                            st.session_state.master_mapping = new_mapping
+                            st.success("Mapping applied successfully! The matrix has been updated.")
+                            st.rerun()
+                    else:
+                        st.error("Invalid CSV format. Must contain 'ProgramName' and 'Build_Phase' columns.")
+                except Exception as e:
+                    st.error(f"Error reading file: {e}")
 
         # --- 互動式分類器 UI ---
         with st.expander("⚙️ Build Phase Mapping Configuration (Interactive Binning)", expanded=True):
@@ -256,7 +286,33 @@ with main_tabs[1]:
                         st.session_state.master_mapping[phase] = protected_progs + new_selection
                         st.rerun()
 
-        # 🌟 新增：自訂良率警示門檻 UI
+            # 🌟 核心功能 2：匯出 Mapping Config
+            st.write("")
+            st.divider()
+            
+            # 將目前的 Dictionary 轉換為供下載的 DataFrame
+            export_data = []
+            for phase, progs in st.session_state.master_mapping.items():
+                for prog in progs:
+                    export_data.append({"ProgramName": prog, "Build_Phase": phase})
+            export_df = pd.DataFrame(export_data)
+            
+            if not export_df.empty:
+                # 轉成 CSV 格式存入記憶體
+                csv_buffer = io.StringIO()
+                export_df.to_csv(csv_buffer, index=False)
+                
+                st.download_button(
+                    label="📤 Export Current Mapping Configuration",
+                    data=csv_buffer.getvalue(),
+                    file_name="build_mapping_config.csv",
+                    mime="text/csv",
+                    help="Save your program assignments to a CSV file so you can import them later."
+                )
+            else:
+                st.info("Assign some programs first to enable exporting.")
+
+
         st.write("")
         col_matrix, col_settings = st.columns([3, 1])
         
@@ -299,13 +355,8 @@ with main_tabs[1]:
                 
                 final_matrix = pivot_yield[exist_phases]
                 
-                # 🌟 將使用者的自訂門檻應用到上色函數中
                 def color_yield_matrix(val):
                     if pd.isna(val): return ''
-                    # 使用者自訂的邏輯：
-                    # >= green_threshold -> 綠色
-                    # >= red_threshold (且 < green) -> 黃色
-                    # < red_threshold -> 紅色
                     if val >= green_threshold:
                         color = '#e6f4ea' # 淺綠
                     elif val >= red_threshold:
@@ -509,6 +560,7 @@ with main_tabs[0]:
             targets[op] = {'theo': theo, 'plan': plan}
             st.sidebar.write("") 
 
+    # ⚠️ 這裡完整保留您的 st.stop()
     if not selected_ops or not selected_progs or not selected_prods:
         st.info("👆 Please select **OpNo, ProgramName, and ProductNo** above to generate the report.")
         st.stop()
