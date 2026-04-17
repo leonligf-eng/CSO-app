@@ -64,6 +64,7 @@ st.markdown("""
         box-shadow: 0 -3px 6px rgba(0,0,0,0.04);
     }
     
+    /* 🌟 強制 Streamlit Dataframe 內容與表頭置中 */
     [data-testid="stDataFrame"] th {
         text-align: center !important;
     }
@@ -71,6 +72,7 @@ st.markdown("""
         text-align: center !important;
     }
     
+    /* 🌟 優化 Quick Action 按鈕的外觀 */
     div[data-testid="column"] button {
         padding: 0.2rem 0.5rem !important;
         font-size: 0.85rem !important;
@@ -173,7 +175,7 @@ if st.session_state.last_uploaded_file != current_file_name:
         "prog_select_widget", "prod_select_widget",
         "date_picker", "last_selection_hash",         # 解決 DateInput 崩潰的關鍵
         "curr_min_date_ref", "curr_max_date_ref",     # 解決 DateInput 崩潰的關鍵
-        "upstream_hash"
+        "upstream_hash", "just_imported" # 🌟 新增：重置 import flag
     ]
     
     for key in list(st.session_state.keys()):
@@ -219,6 +221,7 @@ with main_tabs[1]:
         prog_to_op = clean_build_df.drop_duplicates(subset=['ProgramName']).set_index('ProgramName')['OpNo'].to_dict()
         available_ops = sorted(clean_build_df['OpNo'].dropna().unique().tolist())
         
+        # 初始化 master_mapping
         if "master_mapping" not in st.session_state:
             st.session_state.master_mapping = {phase: [] for phase in build_phases}
             for p in all_programs:
@@ -231,6 +234,10 @@ with main_tabs[1]:
                 elif "DVT" in p_u: st.session_state.master_mapping["DVT"].append(p)
                 elif "PVT" in p_u: st.session_state.master_mapping["PVT"].append(p)
                 elif "MP" in p_u: st.session_state.master_mapping["MP"].append(p)
+                
+        # 初始化 import flag
+        if "just_imported" not in st.session_state:
+            st.session_state.just_imported = False
 
         with st.expander("📥 Import Saved Mapping Configuration", expanded=False):
             st.markdown("<p style='font-size: 13px; color: #666;'>Upload a previously exported mapping CSV file to restore your program classifications instantly.</p>", unsafe_allow_html=True)
@@ -255,6 +262,14 @@ with main_tabs[1]:
                         # 如果上傳成功，更新總帳本
                         if st.button("Apply Imported Mapping", type="primary"):
                             st.session_state.master_mapping = new_mapping
+                            # 🌟 核心防護：設置 just_imported 為 True，保護接下來的第一次渲染不被 UI 狀態逆向覆寫
+                            st.session_state.just_imported = True
+                            
+                            # 同時清除所有舊的 UI key，強迫 UI 重新載入
+                            keys_to_delete = [k for k in st.session_state.keys() if k.startswith("map_ui_")]
+                            for k in keys_to_delete:
+                                del st.session_state[k]
+                                
                             st.success("Mapping applied successfully! The matrix has been updated.")
                             st.rerun()
                     else:
@@ -267,11 +282,18 @@ with main_tabs[1]:
             st.markdown("<p style='font-size: 14px; color: #555;'>Assign programs to their corresponding Build Phases. Use the filter below to classify programs operation by operation.</p>", unsafe_allow_html=True)
             
             st.markdown("##### 🔍 1. Select Operation to Filter Programs")
+            
+            # 使用 callback 追蹤站點切換，切換時解除 import 保護
+            def on_op_change():
+                st.session_state.just_imported = False
+                
             selected_binning_op = st.radio(
                 "Filter by OpNo:", 
                 options=["All"] + available_ops, 
                 horizontal=True,
-                label_visibility="collapsed"
+                label_visibility="collapsed",
+                key="binning_op_selector",
+                on_change=on_op_change
             )
             st.write("")
             
@@ -314,7 +336,8 @@ with main_tabs[1]:
                         help=f"Assign {selected_binning_op if selected_binning_op != 'All' else 'any'} programs to {phase}"
                     )
                     
-                    if set(new_selection) != set(safe_default):
+                    # 🌟 核心防護：只有在 "非剛匯入" 的狀態下，才允許 UI 變化寫回總帳本
+                    if set(new_selection) != set(safe_default) and not st.session_state.just_imported:
                         if selected_binning_op == "All":
                             protected_progs = []
                         else:
@@ -322,6 +345,10 @@ with main_tabs[1]:
                         
                         st.session_state.master_mapping[phase] = protected_progs + new_selection
                         st.rerun()
+            
+            # 本次回圈結束後，解除 import 保護，恢復正常的 UI 互動
+            if st.session_state.just_imported:
+                 st.session_state.just_imported = False
 
             # 🌟 核心功能 2：匯出 Mapping Config
             st.write("")
@@ -347,7 +374,6 @@ with main_tabs[1]:
                 )
             else:
                 st.info("Assign some programs first to enable exporting.")
-
 
         st.write("")
         col_matrix, col_settings = st.columns([3, 1])
