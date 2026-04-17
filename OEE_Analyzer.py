@@ -162,25 +162,22 @@ current_file_name = uploaded_file.name if uploaded_file is not None else "mock_d
 
 if "last_uploaded_file" not in st.session_state:
     st.session_state.last_uploaded_file = current_file_name
-    st.session_state.app_session_id = str(uuid.uuid4())[:8]
 
 # 當使用者上傳新檔案，或是點擊 X 刪除檔案時觸發
 if st.session_state.last_uploaded_file != current_file_name:
     st.session_state.last_uploaded_file = current_file_name
-    st.session_state.app_session_id = str(uuid.uuid4())[:8]
     
     # 💥 終極大掃除：清除所有可能引發越界、找不到選項的過濾器狀態！
     keys_to_clear = [
         "master_mapping", "saved_progs", "op_select", 
         "prog_select_widget", "prod_select_widget",
-        "date_picker", "last_selection_hash",         # 解決 DateInput 崩潰的關鍵
-        "curr_min_date_ref", "curr_max_date_ref",     # 解決 DateInput 崩潰的關鍵
-        "upstream_hash", "just_imported" # 🌟 新增：重置 import flag
+        "date_picker", "last_selection_hash",
+        "curr_min_date_ref", "curr_max_date_ref",
+        "upstream_hash", "binning_op_selector"
     ]
-    
+    # 清理所有已知的狀態
     for key in list(st.session_state.keys()):
-        # 清除指定名單，以及所有動態產生的 UI Widget Key
-        if key in keys_to_clear or key.startswith("map_ui_") or key.startswith("mapping_uploader_"):
+        if key in keys_to_clear or key.startswith("bin_ui_") or key.startswith("mapping_uploader_"):
             del st.session_state[key]
 
 
@@ -221,7 +218,7 @@ with main_tabs[1]:
         prog_to_op = clean_build_df.drop_duplicates(subset=['ProgramName']).set_index('ProgramName')['OpNo'].to_dict()
         available_ops = sorted(clean_build_df['OpNo'].dropna().unique().tolist())
         
-        # 初始化 master_mapping
+        # 🌟 絕對神聖不可侵犯的總帳本
         if "master_mapping" not in st.session_state:
             st.session_state.master_mapping = {phase: [] for phase in build_phases}
             for p in all_programs:
@@ -234,15 +231,12 @@ with main_tabs[1]:
                 elif "DVT" in p_u: st.session_state.master_mapping["DVT"].append(p)
                 elif "PVT" in p_u: st.session_state.master_mapping["PVT"].append(p)
                 elif "MP" in p_u: st.session_state.master_mapping["MP"].append(p)
-                
-        # 初始化 import flag
-        if "just_imported" not in st.session_state:
-            st.session_state.just_imported = False
 
         with st.expander("📥 Import Saved Mapping Configuration", expanded=False):
             st.markdown("<p style='font-size: 13px; color: #666;'>Upload a previously exported mapping CSV file to restore your program classifications instantly.</p>", unsafe_allow_html=True)
             
-            uploader_key = f"mapping_uploader_{st.session_state.app_session_id}"
+            # 確保上傳元件的 Key 每次都不一樣，避免快取問題
+            uploader_key = f"mapping_uploader_{hash(current_file_name)}"
             uploaded_mapping = st.file_uploader("Upload build_mapping_config.csv", type=['csv'], key=uploader_key)
             
             if uploaded_mapping is not None:
@@ -259,17 +253,17 @@ with main_tabs[1]:
                             if phase in new_mapping and prog in all_programs:
                                 new_mapping[phase].append(prog)
                         
-                        # 如果上傳成功，更新總帳本
                         if st.button("Apply Imported Mapping", type="primary"):
+                            # 1. 寫入新資料到總帳本
                             st.session_state.master_mapping = new_mapping
-                            # 🌟 核心防護：設置 just_imported 為 True，保護接下來的第一次渲染不被 UI 狀態逆向覆寫
-                            st.session_state.just_imported = True
+                            # 2. 強制刪除所有的 UI 綁定狀態
+                            for k in list(st.session_state.keys()):
+                                if k.startswith("bin_ui_"):
+                                    del st.session_state[k]
+                            # 3. 如果有 radio button 狀態，設回 All
+                            if "binning_op_selector" in st.session_state:
+                                st.session_state.binning_op_selector = "All"
                             
-                            # 同時清除所有舊的 UI key，強迫 UI 重新載入
-                            keys_to_delete = [k for k in st.session_state.keys() if k.startswith("map_ui_")]
-                            for k in keys_to_delete:
-                                del st.session_state[k]
-                                
                             st.success("Mapping applied successfully! The matrix has been updated.")
                             st.rerun()
                     else:
@@ -281,28 +275,33 @@ with main_tabs[1]:
         with st.expander("⚙️ Build Phase Mapping Configuration (Interactive Binning)", expanded=True):
             st.markdown("<p style='font-size: 14px; color: #555;'>Assign programs to their corresponding Build Phases. Use the filter below to classify programs operation by operation.</p>", unsafe_allow_html=True)
             
+            # --- 處理站點過濾 ---
+            # 為了避免切換 Radio 按鈕造成的狀態錯亂，我們在切換時清理 UI 狀態
+            def on_op_radio_change():
+                for k in list(st.session_state.keys()):
+                    if k.startswith("bin_ui_"):
+                        del st.session_state[k]
+                        
             st.markdown("##### 🔍 1. Select Operation to Filter Programs")
-            
-            # 使用 callback 追蹤站點切換，切換時解除 import 保護
-            def on_op_change():
-                st.session_state.just_imported = False
-                
             selected_binning_op = st.radio(
                 "Filter by OpNo:", 
                 options=["All"] + available_ops, 
                 horizontal=True,
                 label_visibility="collapsed",
                 key="binning_op_selector",
-                on_change=on_op_change
+                on_change=on_op_radio_change
             )
             st.write("")
             
+            # --- 同步：確保總帳本內的資料是最新的 ---
             for phase in build_phases:
                 st.session_state.master_mapping[phase] = [p for p in st.session_state.master_mapping[phase] if p in all_programs]
             
+            # 計算目前的總分配狀態
             assigned_progs_all = [p for progs in st.session_state.master_mapping.values() for p in progs]
             unassigned_pool_all = [p for p in all_programs if p not in assigned_progs_all]
             
+            # 動態過濾 Pool
             if selected_binning_op == "All":
                 filtered_pool = unassigned_pool_all
             else:
@@ -314,21 +313,33 @@ with main_tabs[1]:
             st.caption(", ".join(filtered_pool) if filtered_pool else f"🎉 All active programs for this selection have been assigned!")
             st.write("")
             
+            # --- 準備渲染選單與捕捉變更 ---
             cols1, cols2 = st.columns(4), st.columns(4)
             all_cols = cols1 + cols2
             
+            # 我們需要一個旗標來記錄「是否有任何選單發生了變化」
+            mapping_changed = False
+            
             for i, phase in enumerate(build_phases):
                 with all_cols[i]:
+                    # 1. 計算這個選單應該顯示哪些「已經被選取的選項」
                     if selected_binning_op == "All":
                         curr_visible_selected = [p for p in st.session_state.master_mapping[phase] if p in all_programs]
                     else:
                         curr_visible_selected = [p for p in st.session_state.master_mapping[phase] if p in all_programs and prog_to_op.get(p) == selected_binning_op]
                     
+                    # 2. 計算這個選單的「所有選項」
                     options = sorted(list(set(curr_visible_selected + filtered_pool)))
-                    ui_key = f"map_ui_{phase}_{selected_binning_op}_{st.session_state.app_session_id}"
+                    
+                    # 3. 確保 default 的值一定在 options 內
                     safe_default = [x for x in curr_visible_selected if x in options]
                     
-                    new_selection = st.multiselect(
+                    # 4. 固定的 UI Key
+                    ui_key = f"bin_ui_{phase}"
+                    
+                    # 5. 渲染 multiselect。
+                    # 注意：我們移除了 on_change callback。直接捕捉回傳值。
+                    user_selection = st.multiselect(
                         f"📍 {phase}", 
                         options=options, 
                         default=safe_default, 
@@ -336,25 +347,27 @@ with main_tabs[1]:
                         help=f"Assign {selected_binning_op if selected_binning_op != 'All' else 'any'} programs to {phase}"
                     )
                     
-                    # 🌟 核心防護：只有在 "非剛匯入" 的狀態下，才允許 UI 變化寫回總帳本
-                    if set(new_selection) != set(safe_default) and not st.session_state.just_imported:
+                    # 6. 單向資料流檢查：畫面上的選擇跟我們預期的不一樣嗎？
+                    if set(user_selection) != set(safe_default):
+                        mapping_changed = True
+                        
+                        # 準備將變更寫回總帳本
                         if selected_binning_op == "All":
                             protected_progs = []
                         else:
+                            # 保護不屬於當前過濾站點的既有程式
                             protected_progs = [p for p in st.session_state.master_mapping[phase] if prog_to_op.get(p) != selected_binning_op]
                         
-                        st.session_state.master_mapping[phase] = protected_progs + new_selection
-                        st.rerun()
+                        # 更新總帳本
+                        st.session_state.master_mapping[phase] = protected_progs + user_selection
             
-            # 本次回圈結束後，解除 import 保護，恢復正常的 UI 互動
-            if st.session_state.just_imported:
-                 st.session_state.just_imported = False
+            # 如果偵測到任何變更，強制重新執行整個腳本，確保下方的矩陣是最新的
+            if mapping_changed:
+                st.rerun()
 
-            # 🌟 核心功能 2：匯出 Mapping Config
             st.write("")
             st.divider()
             
-            # 將目前的 Dictionary 轉換為供下載的 DataFrame
             export_data = []
             for phase, progs in st.session_state.master_mapping.items():
                 for prog in progs:
