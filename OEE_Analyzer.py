@@ -4,7 +4,7 @@ import numpy as np
 import plotly.express as px
 from datetime import datetime, timedelta, time
 import io
-import uuid # 🌟 新增：用於產生動態 Key
+import uuid
 
 st.set_page_config(page_title="ATE Capacity & OEE Analyzer", layout="wide")
 
@@ -64,7 +64,6 @@ st.markdown("""
         box-shadow: 0 -3px 6px rgba(0,0,0,0.04);
     }
     
-    /* 🌟 強制 Streamlit Dataframe 內容與表頭置中 */
     [data-testid="stDataFrame"] th {
         text-align: center !important;
     }
@@ -72,7 +71,6 @@ st.markdown("""
         text-align: center !important;
     }
     
-    /* 🌟 優化 Quick Action 按鈕的外觀 */
     div[data-testid="column"] button {
         padding: 0.2rem 0.5rem !important;
         font-size: 0.85rem !important;
@@ -152,39 +150,46 @@ def load_data(file):
     return generate_mock_data()
 
 
-# 🌟 終極修正：檔案變更與動態 Session ID
+# ==============================================================================
+# --- 🌟 核心防護網：檔案變更與全面狀態清理 (File Change Detector) ---
+# ==============================================================================
 uploaded_file = st.sidebar.file_uploader("Upload Yield Report", type=["xlsx", "xls", "ods"])
 
+# 判定目前是真實檔案還是假資料
 current_file_name = uploaded_file.name if uploaded_file is not None else "mock_data"
 
-# 偵測檔案是否更換
 if "last_uploaded_file" not in st.session_state:
     st.session_state.last_uploaded_file = current_file_name
-    # 給予一個獨一無二的 Session ID
     st.session_state.app_session_id = str(uuid.uuid4())[:8]
 
+# 當使用者上傳新檔案，或是點擊 X 刪除檔案時觸發
 if st.session_state.last_uploaded_file != current_file_name:
-    # 檔案改變了，更新檔案名稱並產生一組新的 Session ID
     st.session_state.last_uploaded_file = current_file_name
     st.session_state.app_session_id = str(uuid.uuid4())[:8]
     
-    # 徹底清除舊有的 Master Mapping
-    if "master_mapping" in st.session_state:
-        del st.session_state["master_mapping"]
+    # 💥 終極大掃除：清除所有可能引發越界、找不到選項的過濾器狀態！
+    keys_to_clear = [
+        "master_mapping", "saved_progs", "op_select", 
+        "prog_select_widget", "prod_select_widget",
+        "date_picker", "last_selection_hash",         # 解決 DateInput 崩潰的關鍵
+        "curr_min_date_ref", "curr_max_date_ref",     # 解決 DateInput 崩潰的關鍵
+        "upstream_hash"
+    ]
     
-    # 清理所有殘留的 UI 狀態 (包含 OEE 的 filters)
-    keys_to_delete = ["saved_progs", "op_select", "prog_select_widget", "prod_select_widget"]
     for key in list(st.session_state.keys()):
-        if key.startswith("map_ui_") or key in keys_to_delete:
+        # 清除指定名單，以及所有動態產生的 UI Widget Key
+        if key in keys_to_clear or key.startswith("map_ui_") or key.startswith("mapping_uploader_"):
             del st.session_state[key]
 
 
+# 讀取資料
 raw_df = load_data(uploaded_file)
 
 if raw_df is None or raw_df.empty:
     st.warning("No data available.")
     st.stop()
 
+# 取得全局最大最小值
 global_min_date = raw_df['CheckInTime'].min().date() if pd.notnull(raw_df['CheckInTime'].min()) else datetime.now().date()
 global_max_date = raw_df['CheckOutTime'].max().date() if pd.notnull(raw_df['CheckOutTime'].max()) else datetime.now().date()
 
@@ -193,7 +198,7 @@ min_lot_size = st.sidebar.number_input("Exclude Lots smaller than (Qty)", value=
 st.sidebar.divider()
 
 # ==============================================================================
-# --- 🌟 V53 頂層架構切分 (Main Tabs) ---
+# --- 頂層架構切分 (Main Tabs) ---
 # ==============================================================================
 main_tabs = st.tabs(["📊 OEE Analyzer", "🧬 Overall Build Yield"])
 
@@ -214,10 +219,8 @@ with main_tabs[1]:
         prog_to_op = clean_build_df.drop_duplicates(subset=['ProgramName']).set_index('ProgramName')['OpNo'].to_dict()
         available_ops = sorted(clean_build_df['OpNo'].dropna().unique().tolist())
         
-        # 確保 master_mapping 存在
         if "master_mapping" not in st.session_state:
             st.session_state.master_mapping = {phase: [] for phase in build_phases}
-            
             for p in all_programs:
                 p_u = p.upper()
                 if "PROTO1.0" in p_u or "P10" in p_u: st.session_state.master_mapping["Proto1.0"].append(p)
@@ -232,21 +235,24 @@ with main_tabs[1]:
         with st.expander("📥 Import Saved Mapping Configuration", expanded=False):
             st.markdown("<p style='font-size: 13px; color: #666;'>Upload a previously exported mapping CSV file to restore your program classifications instantly.</p>", unsafe_allow_html=True)
             
-            # 給 uploader 一個動態 key，避免舊檔案殘留
             uploader_key = f"mapping_uploader_{st.session_state.app_session_id}"
             uploaded_mapping = st.file_uploader("Upload build_mapping_config.csv", type=['csv'], key=uploader_key)
             
             if uploaded_mapping is not None:
                 try:
+                    # 讀取 CSV
                     mapping_df = pd.read_csv(uploaded_mapping)
                     if 'ProgramName' in mapping_df.columns and 'Build_Phase' in mapping_df.columns:
+                        # 清空現有狀態，避免舊資料殘留
                         new_mapping = {phase: [] for phase in build_phases}
+                        # 依照上傳的設定重新指派
                         for _, row in mapping_df.iterrows():
                             prog = row['ProgramName']
                             phase = row['Build_Phase']
                             if phase in new_mapping and prog in all_programs:
                                 new_mapping[phase].append(prog)
                         
+                        # 如果上傳成功，更新總帳本
                         if st.button("Apply Imported Mapping", type="primary"):
                             st.session_state.master_mapping = new_mapping
                             st.success("Mapping applied successfully! The matrix has been updated.")
@@ -269,7 +275,6 @@ with main_tabs[1]:
             )
             st.write("")
             
-            # 確保 master_mapping 裡面的東西真的存在於目前的檔案中 (防錯)
             for phase in build_phases:
                 st.session_state.master_mapping[phase] = [p for p in st.session_state.master_mapping[phase] if p in all_programs]
             
@@ -298,12 +303,7 @@ with main_tabs[1]:
                         curr_visible_selected = [p for p in st.session_state.master_mapping[phase] if p in all_programs and prog_to_op.get(p) == selected_binning_op]
                     
                     options = sorted(list(set(curr_visible_selected + filtered_pool)))
-                    
-                    # 🌟 核心修正：將 app_session_id 加入 UI Key 中！
-                    # 只要檔案一換，app_session_id 就會變，這 8 個 multiselect 就會被視為全新元件，不會報錯！
                     ui_key = f"map_ui_{phase}_{selected_binning_op}_{st.session_state.app_session_id}"
-                    
-                    # 再次雙重保險：確保 default 的值一定在 options 內
                     safe_default = [x for x in curr_visible_selected if x in options]
                     
                     new_selection = st.multiselect(
@@ -338,7 +338,6 @@ with main_tabs[1]:
                 # 轉成 CSV 格式存入記憶體
                 csv_buffer = io.StringIO()
                 export_df.to_csv(csv_buffer, index=False)
-                
                 st.download_button(
                     label="📤 Export Current Mapping Configuration",
                     data=csv_buffer.getvalue(),
@@ -372,7 +371,6 @@ with main_tabs[1]:
             if red_threshold >= green_threshold:
                 st.error("Critical threshold must be lower than Healthy threshold.")
 
-        # --- 生成矩陣報表 ---
         with col_matrix:
             prog_to_build = {p: phase for phase, progs in st.session_state.master_mapping.items() for p in progs}
             build_df = clean_build_df.copy()
@@ -389,17 +387,13 @@ with main_tabs[1]:
                 pivot_yield = matrix_sum.pivot(index='OpNo', columns='Build_Phase', values='Yield')
                 
                 exist_phases = [p for p in build_phases if p in pivot_yield.columns]
-                
                 final_matrix = pivot_yield[exist_phases]
                 
                 def color_yield_matrix(val):
                     if pd.isna(val): return ''
-                    if val >= green_threshold:
-                        color = '#e6f4ea' # 淺綠
-                    elif val >= red_threshold:
-                        color = '#fff3cd' # 淺黃
-                    else:
-                        color = '#fdecea' # 淺紅
+                    if val >= green_threshold: color = '#e6f4ea'
+                    elif val >= red_threshold: color = '#fff3cd'
+                    else: color = '#fdecea'
                     return f'background-color: {color}; font-weight: bold; color: #333;'
 
                 styled_matrix = final_matrix.style.map(color_yield_matrix).format("{:.2f}%", na_rep="-").set_properties(**{'text-align': 'center', 'font-size': '15px'}).set_table_styles([
@@ -410,7 +404,7 @@ with main_tabs[1]:
                 st.dataframe(styled_matrix, use_container_width=True)
 
 # ==============================================================================
-# --- 📊 Tab 1: OEE Analyzer (完全無改動區塊) ---
+# --- 📊 Tab 1: OEE Analyzer ---
 # ==============================================================================
 with main_tabs[0]:
     # ==============================================================================
