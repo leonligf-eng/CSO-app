@@ -169,9 +169,7 @@ st.sidebar.divider()
 main_tabs = st.tabs(["📊 OEE Analyzer", "🧬 Overall Build Yield"])
 
 # ==============================================================================
-# --- 🧬 Tab 2: Overall Build Yield Tracking (強化狀態管理版) ---
-# 巧妙設計：在這裡先執行並渲染 Tab 2，因為它不需要後續 OEE 的 Filter，
-# 這樣就算後面的 OEE 觸發了 st.stop()，這個 Tab 依然能活著！
+# --- 🧬 Tab 2: Overall Build Yield Tracking (強化狀態管理版 + 站點過濾器) ---
 # ==============================================================================
 with main_tabs[1]:
     st.write("")
@@ -184,6 +182,10 @@ with main_tabs[1]:
     else:
         build_phases = ["Proto1.0", "Proto1.1", "EVT1.0(A0)", "EVT1.0(B0)", "EVT1.1", "DVT", "PVT", "MP"]
         all_programs = sorted(clean_build_df['ProgramName'].dropna().unique().tolist())
+        
+        # 🌟 新增：建立 ProgramName -> OpNo 的對應字典，用於 UI 過濾
+        prog_to_op = clean_build_df.drop_duplicates(subset=['ProgramName']).set_index('ProgramName')['OpNo'].to_dict()
+        available_ops = sorted(clean_build_df['OpNo'].dropna().unique().tolist())
         
         if "build_mapping" not in st.session_state:
             st.session_state.build_mapping = {phase: [] for phase in build_phases}
@@ -199,8 +201,7 @@ with main_tabs[1]:
                 elif "PVT" in p_u: st.session_state.build_mapping["PVT"].append(p)
                 elif "MP" in p_u: st.session_state.build_mapping["MP"].append(p)
 
-        # 🌟 修復 1：強制狀態同步器 (State Synchronizer)
-        # 確保 Widget 的實際選擇結果，能精準回傳到背景的 Mapping 記憶體中，防止選項消失
+        # 強制狀態同步器
         for phase in build_phases:
             widget_key = f"map_{phase}"
             if widget_key in st.session_state:
@@ -211,10 +212,28 @@ with main_tabs[1]:
         
         # --- 互動式分類器 ---
         with st.expander("⚙️ Build Phase Mapping Configuration (Interactive Binning)", expanded=True):
-            st.markdown("<p style='font-size: 14px; color: #555;'>Assign programs to their corresponding Build Phases. Selected programs will automatically disappear from other menus.</p>", unsafe_allow_html=True)
+            st.markdown("<p style='font-size: 14px; color: #555;'>Assign programs to their corresponding Build Phases. To make assignment easier, use the filter below to classify programs operation by operation.</p>", unsafe_allow_html=True)
             
-            st.markdown(f"**📦 Unassigned Program Pool ({len(unassigned_pool)})**")
-            st.caption(", ".join(unassigned_pool) if unassigned_pool else "🎉 All active programs have been successfully assigned to a Build Phase!")
+            # 🌟 新增：站點過濾 UI
+            st.markdown("##### 🔍 1. Select Operation to Filter Programs")
+            selected_binning_op = st.radio(
+                "Filter by OpNo:", 
+                options=["All"] + available_ops, 
+                horizontal=True,
+                label_visibility="collapsed"
+            )
+            st.write("")
+            
+            # 🌟 動態過濾 Pool
+            if selected_binning_op == "All":
+                filtered_pool = unassigned_pool
+            else:
+                filtered_pool = [p for p in unassigned_pool if prog_to_op.get(p) == selected_binning_op]
+
+            st.markdown(f"##### 📦 2. Unassigned Program Pool ({len(filtered_pool)})")
+            if selected_binning_op != "All":
+                st.caption(f"Currently showing unassigned programs for **{selected_binning_op}** only.")
+            st.caption(", ".join(filtered_pool) if filtered_pool else f"🎉 All active programs for this selection have been assigned!")
             st.write("")
             
             cols1, cols2 = st.columns(4), st.columns(4)
@@ -222,16 +241,33 @@ with main_tabs[1]:
             
             for i, phase in enumerate(build_phases):
                 with all_cols[i]:
-                    curr_selected = [p for p in st.session_state.build_mapping[phase] if p in all_programs]
-                    options = sorted(list(set(curr_selected + unassigned_pool)))
+                    # 找出這個 Phase 裡面，符合當前站點過濾的已選擇程式
+                    if selected_binning_op == "All":
+                        curr_selected = [p for p in st.session_state.build_mapping[phase] if p in all_programs]
+                    else:
+                        curr_selected = [p for p in st.session_state.build_mapping[phase] if p in all_programs and prog_to_op.get(p) == selected_binning_op]
                     
-                    # 🌟 修復 1：僅使用 key 來自動追蹤狀態，不再覆寫變數，徹底解決閃退問題
+                    # 選單的選項 = 符合過濾條件的 (已選 + 未選)
+                    options = sorted(list(set(curr_selected + filtered_pool)))
+                    
                     st.multiselect(
                         f"📍 {phase}", 
                         options=options, 
                         default=curr_selected, 
-                        key=f"map_{phase}"
+                        key=f"map_{phase}",
+                        # 如果選擇了特定站點，提示文字會改變
+                        help=f"Assign {selected_binning_op if selected_binning_op != 'All' else 'any'} programs to {phase}"
                     )
+            
+            # 🌟 隱藏機關：如果是在「特定站點」模式下，我們需要把「不屬於這個站點，但已經被分配在這個 Phase」的程式默默補回去 Session State，以免它們被洗掉。
+            if selected_binning_op != "All":
+                 for phase in build_phases:
+                     widget_key = f"map_{phase}"
+                     if widget_key in st.session_state:
+                         # 取出原本就存在，但不屬於現在這個過濾站點的程式
+                         hidden_progs = [p for p in st.session_state.build_mapping[phase] if prog_to_op.get(p) != selected_binning_op]
+                         # 將 UI 上選的，跟隱藏的合併回去
+                         st.session_state.build_mapping[phase] = st.session_state[widget_key] + hidden_progs
 
         prog_to_build = {p: phase for phase, progs in st.session_state.build_mapping.items() for p in progs}
         build_df = clean_build_df.copy()
@@ -249,7 +285,6 @@ with main_tabs[1]:
             
             exist_phases = [p for p in build_phases if p in pivot_yield.columns]
             
-            # 🌟 修復 2：移除 CUM Yield 的計算，直接顯示最純粹的站點良率矩陣
             final_matrix = pivot_yield[exist_phases]
             
             def color_yield_matrix(val):
