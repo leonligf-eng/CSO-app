@@ -77,6 +77,23 @@ st.markdown("""
         border-radius: 4px !important;
     }
 
+    /* 🌟 客製化 Apply 按鈕 (現代感) */
+    div[data-testid="stButton"] button:contains("Apply Imported Mapping"),
+    #btn-apply-mapping {
+        background-color: #334155 !important; /* Slate-700 */
+        color: white !important;
+        border: none !important;
+        border-radius: 6px !important;
+        padding: 0.5rem 1rem !important;
+        font-weight: 600 !important;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1) !important;
+        transition: all 0.2s !important;
+    }
+    div[data-testid="stButton"] button:contains("Apply Imported Mapping"):hover {
+        background-color: #1E293B !important; /* Slate-800 */
+        box-shadow: 0 6px 8px -1px rgba(0, 0, 0, 0.15) !important;
+    }
+
     /* 🌟 方案 B：藍天科技風 (Sky Blue / Cloud Native) */
     .custom-matrix-table {
         width: 100%;
@@ -288,7 +305,10 @@ with main_tabs[1]:
         all_programs = sorted(clean_build_df['ProgramName'].dropna().unique().tolist())
         
         prog_to_op = clean_build_df.drop_duplicates(subset=['ProgramName']).set_index('ProgramName')['OpNo'].to_dict()
-        available_ops = sorted(clean_build_df['OpNo'].dropna().unique().tolist())
+        
+        # 🌟 需求 4：自動隱藏 LS 和 T/R 站點
+        all_ops_raw = clean_build_df['OpNo'].dropna().unique().tolist()
+        available_ops = sorted([op for op in all_ops_raw if not any(x in op.upper() for x in ['LS', 'T/R', 'T\\R'])])
         
         # 初始化 master_mapping
         if "master_mapping" not in st.session_state:
@@ -328,9 +348,10 @@ with main_tabs[1]:
                             if phase in new_mapping and prog in all_programs:
                                 new_mapping[phase].append(prog)
                         
-                        if st.button("Apply Imported Mapping", type="primary"):
+                        # 🌟 需求 5：按鈕樣式透過 CSS 注入
+                        st.markdown('<div id="btn-apply-mapping"></div>', unsafe_allow_html=True)
+                        if st.button("Apply Imported Mapping"):
                             st.session_state.master_mapping = new_mapping
-                            
                             # 🌟 強制標記為「剛匯入」狀態，這會保護總帳本在下一次渲染時不被覆寫
                             st.session_state.just_imported = True
                             
@@ -538,8 +559,8 @@ with main_tabs[1]:
                 html_out += f'<th>{col}</th>'
             html_out += '</tr></thead><tbody>'
 
-            # 🌟 方案 B: 藍天科技風標題 (天空藍底 + 科技藍文字 + 頂部邊框點綴)
-            modern_header_style = "background-color: #F0F9FF; color: #0369A1; font-family: 'Google Sans', Roboto, sans-serif; font-weight: 800; font-size: 16px; text-align: center; padding: 12px; border-top: 2px solid #7DD3FC; border-bottom: 1px solid #BAE6FD; letter-spacing: 0.5px;"
+            # 🌟 需求 1：無邊框、實體色塊包覆感 (稍微加深底色界定區塊)
+            modern_header_style = "background-color: #E0F2FE; color: #0369A1; font-family: 'Google Sans', Roboto, sans-serif; font-weight: 800; font-size: 16px; text-align: center; padding: 14px; letter-spacing: 0.5px;"
 
             # ==========================================
             # 區塊 1: Test Yield
@@ -559,7 +580,8 @@ with main_tabs[1]:
                     for phase in ordered_phases:
                         cell_data = op_data[op_data['Build_Phase'] == phase]
                         if cell_data.empty or pd.isna(cell_data['Yield'].values[0]):
-                            html_out += '<td>-</td>'
+                            # 🌟 需求 3：淡化空值符號
+                            html_out += '<td><span style="color: #CBD5E1;">-</span></td>'
                         else:
                             y_val = cell_data['Yield'].values[0]
                             t_val = int(cell_data['T_Qty'].values[0])
@@ -568,7 +590,7 @@ with main_tabs[1]:
                             bg = get_bg_color(y_val, ft_g, ft_r)
                             txt_c = get_text_color(y_val, ft_r)
                             
-                            cell_html = f"<div style='color: {txt_c};'><b>{y_val:.2f}%</b><br><span style='font-size: 11px; font-weight: normal;'>T: {t_val:,} | P: {p_val:,}</span></div>"
+                            cell_html = f"<div style='color: {txt_c};'><b>{y_val:.2f}%</b><br><span style='font-size: 11px; font-weight: normal; color: #64748B;'>T: {t_val:,} | P: {p_val:,}</span></div>"
                             html_out += f'<td style="background-color: {bg};">{cell_html}</td>'
                     html_out += '</tr>'
 
@@ -595,7 +617,7 @@ with main_tabs[1]:
                     for phase in ordered_phases:
                         cell_data = op_data[op_data['Build_Phase'] == phase]
                         if cell_data.empty or cell_data['T_Qty'].values[0] == 0:
-                            html_out += '<td>-</td>'
+                            html_out += '<td><span style="color: #CBD5E1;">-</span></td>'
                         else:
                             t_qty = float(cell_data['T_Qty'].values[0])
                             t_in_qty = float(cell_data['T_In_Qty'].values[0])
@@ -614,7 +636,8 @@ with main_tabs[1]:
                             bg = get_bg_color(op_y_val, op_g, op_r)
                             txt_c = get_text_color(op_y_val, op_r)
                             
-                            cell_html = f"<div style='color: {txt_c};'><b>{op_y_val:.2f}%</b><br><div style='font-size: 11px; line-height: 1.3;'>OP Loss: {op_loss_total:,}<br>(Input: {input_loss:,} | Pass: {pass_loss:,})<br>Fail Loss: {fail_loss:,}</div></div>"
+                            # 🌟 需求 2：次級資訊文字淡化 (#64748B)
+                            cell_html = f"<div style='color: {txt_c};'><b>{op_y_val:.2f}%</b><br><div style='font-size: 11px; line-height: 1.3; color: #64748B;'>OP Loss: {op_loss_total:,}<br>(Input: {input_loss:,} | Pass: {pass_loss:,})<br>Fail Loss: {fail_loss:,}</div></div>"
                             html_out += f'<td style="background-color: {bg};">{cell_html}</td>'
                     html_out += '</tr>'
 
@@ -636,7 +659,7 @@ with main_tabs[1]:
                     for phase in ordered_phases:
                         cell_data = op_data[op_data['Build_Phase'] == phase]
                         if cell_data.empty or pd.isna(cell_data['Yield'].values[0]):
-                            html_out += '<td>-</td>'
+                            html_out += '<td><span style="color: #CBD5E1;">-</span></td>'
                         else:
                             y_val = cell_data['Yield'].values[0]
                             t_val = int(cell_data['T_Qty'].values[0])
@@ -645,7 +668,7 @@ with main_tabs[1]:
                             bg = get_bg_color(y_val, ls_g, ls_r)
                             txt_c = get_text_color(y_val, ls_r)
                             
-                            cell_html = f"<div style='color: {txt_c};'><b>{y_val:.2f}%</b><br><span style='font-size: 11px; font-weight: normal;'>T: {t_val:,} | P: {p_val:,}</span></div>"
+                            cell_html = f"<div style='color: {txt_c};'><b>{y_val:.2f}%</b><br><span style='font-size: 11px; font-weight: normal; color: #64748B;'>T: {t_val:,} | P: {p_val:,}</span></div>"
                             html_out += f'<td style="background-color: {bg};">{cell_html}</td>'
                     html_out += '</tr>'
                     
