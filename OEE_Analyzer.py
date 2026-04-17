@@ -11,6 +11,9 @@ st.set_page_config(page_title="ATE Capacity & OEE Analyzer", layout="wide")
 # --- Custom CSS ---
 st.markdown("""
     <style>
+    /* 匯入現代字體，優先順序為 Google Sans -> Roboto -> 系統預設 */
+    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;800&display=swap');
+    
     .kpi-card { background-color: #ffffff; border: 1px solid #e0e0e0; padding: 20px; border-radius: 8px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05); text-align: center; margin-bottom: 25px; }
     .kpi-title { color: #6c757d; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;}
     .kpi-value { color: #1E3A8A; font-size: 32px; font-weight: bold; margin-top: 10px; }
@@ -64,15 +67,9 @@ st.markdown("""
         box-shadow: 0 -3px 6px rgba(0,0,0,0.04);
     }
     
-    /* 🌟 強制 Streamlit Dataframe 內容與表頭置中 */
-    [data-testid="stDataFrame"] th {
-        text-align: center !important;
-    }
-    [data-testid="stDataFrame"] td {
-        text-align: center !important;
-    }
+    [data-testid="stDataFrame"] th { text-align: center !important; }
+    [data-testid="stDataFrame"] td { text-align: center !important; }
     
-    /* 🌟 優化 Quick Action 按鈕的外觀 */
     div[data-testid="column"] button {
         padding: 0.2rem 0.5rem !important;
         font-size: 0.85rem !important;
@@ -80,29 +77,47 @@ st.markdown("""
         border-radius: 4px !important;
     }
 
-    /* 🌟 新增：HTML Table Styling 用於複合矩陣渲染 (響應式自動縮放) */
+    /* 🌟 方案 B：藍天科技風 (Sky Blue / Cloud Native) */
     .custom-matrix-table {
         width: 100%;
         border-collapse: collapse;
         margin: 15px 0;
-        font-size: 14px; /* 字體稍微縮小一點點適應小螢幕 */
-        font-family: sans-serif;
-        table-layout: fixed; /* 關鍵：強制平均分配寬度 */
-        word-wrap: break-word; /* 關鍵：允許長文字斷行 */
+        font-size: 14px; 
+        font-family: 'Google Sans', Roboto, -apple-system, BlinkMacSystemFont, sans-serif;
+        table-layout: fixed; 
+        word-wrap: break-word; 
+        border-radius: 8px;
+        overflow: hidden; 
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03); /* 增加輕微雲端懸浮感 */
     }
-    .custom-matrix-table th {
-        background-color: #f0f2f6;
-        color: #31333F;
+    /* 表頭：柔和的雲朵灰藍色 */
+    .custom-matrix-table thead th {
+        background-color: #F8FAFC; 
+        color: #475569; 
         text-align: center;
-        padding: 8px 4px; /* 減少 padding 節省空間 */
-        border: 1px solid #dee2e6;
+        padding: 10px 4px; 
+        border-bottom: 2px solid #E2E8F0; 
+        border-right: 1px solid #E2E8F0;
         font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
     }
+    /* 第一欄：維持乾淨 */
+    .custom-matrix-table tbody th {
+        background-color: #FFFFFF; 
+        color: #334155; 
+        font-weight: 600;
+        border: 1px solid #E2E8F0; 
+        padding: 10px 4px;
+        text-align: center;
+    }
+    /* 資料儲存格 */
     .custom-matrix-table td {
         text-align: center;
-        padding: 8px 4px; /* 減少 padding 節省空間 */
-        border: 1px solid #dee2e6;
+        padding: 10px 4px; 
+        border: 1px solid #E2E8F0; 
         vertical-align: middle;
+        color: #334155;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -141,20 +156,23 @@ def generate_mock_data():
         test_duration = timedelta(hours=np.random.uniform(6, 14))
         end_time = start_time + test_duration
         
-        # 精確產生符合情境邏輯的整數資料
+        # 精確產生符合真實報表邏輯的資料
         qty = np.random.randint(3000, 8000) # TestQty (MES In)
+        
+        # 模擬 Input Loss (進站落差)
         input_loss = np.random.randint(0, 10)
         test_in_qty = qty - input_loss
         
-        pass_loss = np.random.randint(0, 15)
-        pass_qty_real = int(test_in_qty * np.random.uniform(0.85, 0.99))
-        test_out_qty = pass_qty_real + pass_loss
-        pass_qty = pass_qty_real
+        # 模擬機台測試良率
+        pass_qty = int(test_in_qty * np.random.uniform(0.85, 0.99))
         
-        fail_loss = np.random.randint(0, 5)
-        fail_qty = test_in_qty - test_out_qty - fail_loss
+        # 根據真實資料: Test Out Qty 幾乎等於 PassQty (或是比Pass多一點點)
+        pass_loss = np.random.randint(0, 5)
+        test_out_qty = pass_qty + pass_loss
         
-        # 防呆
+        # 模擬其他的作業損耗 (FailQty)
+        handling_loss = np.random.randint(0, 10)
+        fail_qty = test_in_qty - test_out_qty - handling_loss
         if fail_qty < 0: fail_qty = 0
         
         first_pass_qty = int(pass_qty * np.random.uniform(0.95, 1.0))
@@ -182,14 +200,21 @@ def load_data(file):
             if 'ProductNo' not in df.columns:
                 df['ProductNo'] = "Unknown_Product"
                 
-            # 確保新欄位存在，若無則用預設值填補以免報錯
-            if 'TestInQty' not in df.columns: df['TestInQty'] = df['TestQty']
-            if 'TestOutQty' not in df.columns: df['TestOutQty'] = df['PassQty']
-            if 'FailQty' not in df.columns: df['FailQty'] = df['TestQty'] - df['PassQty']
-            
-            df['TestInQty'] = pd.to_numeric(df['TestInQty'], errors='coerce').fillna(df['TestQty'])
-            df['TestOutQty'] = pd.to_numeric(df['TestOutQty'], errors='coerce').fillna(df['PassQty'])
-            df['FailQty'] = pd.to_numeric(df['FailQty'], errors='coerce').fillna(df['TestQty'] - df['PassQty'])
+            # 安全防護: 如果上傳的表沒有這些欄位，用標準值補上，避免掛掉
+            if 'Test in Qty' in df.columns:
+                df['TestInQty'] = pd.to_numeric(df['Test in Qty'], errors='coerce').fillna(df['TestQty'])
+            elif 'TestInQty' not in df.columns: 
+                df['TestInQty'] = df['TestQty']
+                
+            if 'Test Out Qty' in df.columns:
+                df['TestOutQty'] = pd.to_numeric(df['Test Out Qty'], errors='coerce').fillna(df['PassQty'])
+            elif 'TestOutQty' not in df.columns: 
+                df['TestOutQty'] = df['PassQty']
+                
+            if 'FailQty' not in df.columns: 
+                df['FailQty'] = df['TestQty'] - df['PassQty']
+            else:
+                df['FailQty'] = pd.to_numeric(df['FailQty'], errors='coerce').fillna(df['TestQty'] - df['PassQty'])
             
             return df
         except Exception as e:
@@ -446,25 +471,25 @@ with main_tabs[1]:
             t_col1, t_col2, t_col3 = st.columns(3)
             
             with t_col1:
-                st.markdown("**🎯 Final Test Yield**")
-                ft_g = st.number_input("🟩 FT Healthy (%)", value=95.0, step=0.5, key="ft_g")
-                ft_r = st.number_input("🟥 FT Critical (%)", value=90.0, step=0.5, key="ft_r")
+                st.markdown("**Test Yield**")
+                ft_g = st.number_input("🟩 Healthy (%)", value=95.0, step=0.5, key="ft_g")
+                ft_r = st.number_input("🟥 Critical (%)", value=90.0, step=0.5, key="ft_r")
             
             with t_col2:
-                st.markdown("**🛠️ Operation Yield**")
-                op_g = st.number_input("🟩 Op Healthy (%)", value=99.5, step=0.5, key="op_g")
-                op_r = st.number_input("🟥 Op Critical (%)", value=98.0, step=0.5, key="op_r")
+                st.markdown("**Operation Yield**")
+                op_g = st.number_input("🟩 Healthy (%)", value=99.5, step=0.5, key="op_g")
+                op_r = st.number_input("🟥 Critical (%)", value=98.0, step=0.5, key="op_r")
             
             with t_col3:
-                st.markdown("**🔍 LS Yield**")
-                ls_g = st.number_input("🟩 LS Healthy (%)", value=99.0, step=0.5, key="ls_g")
-                ls_r = st.number_input("🟥 LS Critical (%)", value=95.0, step=0.5, key="ls_r")
+                st.markdown("**LS Yield**")
+                ls_g = st.number_input("🟩 Healthy (%)", value=99.0, step=0.5, key="ls_g")
+                ls_r = st.number_input("🟥 Critical (%)", value=95.0, step=0.5, key="ls_r")
             
             if ft_r >= ft_g or op_r >= op_g or ls_r >= ls_g:
                 st.error("Critical limits must be lower than Healthy limits.")
 
         # ==============================================================================
-        # --- 🌟 關鍵修改：大一統矩陣 (Unified HTML Matrix) ---
+        # --- 🌟 大一統矩陣 (Unified HTML Matrix) ---
         # ==============================================================================
         prog_to_build = {p: phase for phase, progs in st.session_state.master_mapping.items() for p in progs}
         build_df = clean_build_df.copy()
@@ -494,14 +519,14 @@ with main_tabs[1]:
             # 動態背景色判定
             def get_bg_color(val, g_thresh, r_thresh):
                 if pd.isna(val): return ''
-                if val >= g_thresh: return '#e6f4ea'
-                elif val >= r_thresh: return '#fff3cd'
-                else: return '#fdecea'
+                if val >= g_thresh: return '#e6f4ea' # 淺綠
+                elif val >= r_thresh: return '#fef08a' # 淺黃 warning
+                else: return '#fee2e2' # 淺紅 critical
             
-            # 🌟 新增：動態文字顏色判定 (Critical 變深紅)
+            # 🌟 動態文字顏色判定 (Critical 變深紅)
             def get_text_color(val, r_thresh):
-                if pd.isna(val): return '#333333'
-                return '#d32f2f' if val < r_thresh else '#333333'
+                if pd.isna(val): return '#334155'
+                return '#991b1b' if val < r_thresh else '#334155'
 
             all_used_phases = build_df['Build_Phase'].unique().tolist()
             ordered_phases = [p for p in build_phases if p in all_used_phases]
@@ -513,8 +538,8 @@ with main_tabs[1]:
                 html_out += f'<th>{col}</th>'
             html_out += '</tr></thead><tbody>'
 
-            # 🌟 現代風格大標題 CSS
-            modern_header_style = "background-color: #f1f5f9; color: #111827; font-weight: 800; font-size: 15px; text-align: center; padding: 12px; border-top: 2px solid #9ca3af; border-bottom: 2px solid #9ca3af; letter-spacing: 0.5px;"
+            # 🌟 方案 B: 藍天科技風標題 (天空藍底 + 科技藍文字 + 頂部邊框點綴)
+            modern_header_style = "background-color: #F0F9FF; color: #0369A1; font-family: 'Google Sans', Roboto, sans-serif; font-weight: 800; font-size: 16px; text-align: center; padding: 12px; border-top: 2px solid #7DD3FC; border-bottom: 1px solid #BAE6FD; letter-spacing: 0.5px;"
 
             # ==========================================
             # 區塊 1: Test Yield
@@ -578,18 +603,18 @@ with main_tabs[1]:
                             p_qty = float(cell_data['P_Qty'].values[0])
                             f_qty = float(cell_data['F_Qty'].values[0])
                             
-                            # 🌟 精確的整數運算邏輯，絕無小數點進位誤差
+                            # 🌟 絕對鐵律公式
                             input_loss = max(0, int(t_qty - t_in_qty))
                             pass_loss = max(0, int(t_out_qty - p_qty))
                             fail_loss = max(0, int(t_in_qty - t_out_qty - f_qty))
                             
-                            op_loss = input_loss + pass_loss
-                            op_y_val = (1 - (op_loss / t_qty)) * 100 if t_qty > 0 else 0
+                            op_loss_total = input_loss + pass_loss
+                            op_y_val = (1 - (op_loss_total / t_qty)) * 100 if t_qty > 0 else 0
                             
                             bg = get_bg_color(op_y_val, op_g, op_r)
                             txt_c = get_text_color(op_y_val, op_r)
                             
-                            cell_html = f"<div style='color: {txt_c};'><b>{op_y_val:.2f}%</b><br><div style='font-size: 11px; line-height: 1.3;'>OP Loss: {op_loss:,}<br>(Input: {input_loss:,} | Pass: {pass_loss:,})<br>Fail Loss: {fail_loss:,}</div></div>"
+                            cell_html = f"<div style='color: {txt_c};'><b>{op_y_val:.2f}%</b><br><div style='font-size: 11px; line-height: 1.3;'>OP Loss: {op_loss_total:,}<br>(Input: {input_loss:,} | Pass: {pass_loss:,})<br>Fail Loss: {fail_loss:,}</div></div>"
                             html_out += f'<td style="background-color: {bg};">{cell_html}</td>'
                     html_out += '</tr>'
 
