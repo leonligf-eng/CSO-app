@@ -1072,108 +1072,119 @@ with main_tabs[2]:
         op_station_df = df_station[df_station['站點'] == selected_osat_op].copy()
         
         if op_station_df.empty:
-            st.info("No data available for this operation.")
+            st.warning(f"No specific station data found for '{selected_osat_op}'.")
         else:
-            st.divider()
-            osat_tabs = st.tabs(["🎯 Operation (OEE Alignment)", "🏥 Tester Health & Waste", "🕵️ Cross-Validation & RCA"])
+            # ==========================================
+            # 🛠️ 雙軌制邏輯解耦 (Dual-Track Routing)
+            # ==========================================
+            is_ate_track = selected_cat == "ATE"
             
-            # --- 🟢 Module A: Performance Alignment ---
-            with osat_tabs[0]:
-                st.markdown("### ⚖️ OEE Alignment: Internal Target vs. OSAT Reported")
-                    
-                # 先算出內部標準的最大理論值 (Theoretical MAX)
+            if is_ate_track:
+                # 🚂 軌道一：ATE 模式 (連動全域計算機)
+                st.caption(f"🔗 **Linked to Global Capacity Calculator** (TT: {calc_test_time}s, Site: {calc_site})")
+                
                 ie_max_upd = (86400 / calc_test_time) * int(calc_site) if calc_test_time > 0 else 0
-
-                op_station_df['Expected_Output'] = op_station_df['開機數'] * single_cap
-                # 🌟 修正：Core True OEE Calculation (分母必須是 MAX，而不是 Target)
-                op_station_df['Max_Possible_Output'] = op_station_df['開機數'] * ie_max_upd
-                op_station_df['True_OEE'] = np.where(op_station_df['Max_Possible_Output'] > 0, op_station_df['正測顆數'] / op_station_df['Max_Possible_Output'], 0)
-                
-                # --- 🎯 Implied Baseline Engine (4-Dimension Breakdown) ---
-                total_qty = op_station_df['正測顆數'].sum()
-                total_machines = op_station_df['開機數'].sum()
-                total_machine_days = (op_station_df['開機數'] * op_station_df['OEE']).sum()
-                
-                # [1. Internal IE Standard]
+                ie_target_upd = single_cap
                 ie_oee = calc_oee
-                ie_target_upd = single_cap 
                 
-                # [2. OSAT Actual Data]
-                osat_implied_max = total_qty / total_machine_days if total_machine_days > 0 else 0
-                osat_implied_tt = (86400 / osat_implied_max) * int(calc_site) if osat_implied_max > 0 else 0 
-                osat_avg_oee = op_station_df['OEE'].mean() * 100
-                osat_actual_upd = total_qty / total_machines if total_machines > 0 else 0
+                speed_label = "T.T"
+                speed_unit = "s"
+                ie_speed_val = calc_test_time
                 
-                # [3. Variance Calculation]
-                max_gap = osat_implied_max - ie_max_upd
-                tt_gap = osat_implied_tt - calc_test_time 
-                output_gap = osat_actual_upd - ie_target_upd
+            else:
+                # 🚀 軌道二：SLT / AOI 模式 (Local 本地輸入)
+                st.info(f"💡 **{selected_cat} Mode**: Independent from Global Calculator. Please define standard parameters.")
+                col_local1, col_local2 = st.columns(2)
+                with col_local1:
+                    std_uph = st.number_input("Standard UPH (ea/hr)", min_value=1, value=1000, step=100)
+                with col_local2:
+                    local_target_oee = st.number_input("Target OEE %", min_value=0.0, max_value=100.0, value=85.0, step=1.0)
+                
+                ie_max_upd = std_uph * 24
+                ie_target_upd = ie_max_upd * (local_target_oee / 100.0)
+                ie_oee = local_target_oee
+                
+                speed_label = "UPH"
+                speed_unit = "ea/hr"
+                ie_speed_val = std_uph
 
-                # ==========================================
-                # Display Alignment Dashboard (Pixel-Perfect Layout)
-                # ==========================================
+            # ==========================================
+            # 📊 共用底層運算與 True OEE
+            # ==========================================
+            op_station_df['Expected_Output'] = op_station_df['開機數'] * ie_target_upd
+            
+            op_station_df['Max_Possible_Output'] = op_station_df['開機數'] * ie_max_upd
+            op_station_df['True_OEE'] = np.where(
+                op_station_df['Max_Possible_Output'] > 0, 
+                op_station_df['正測顆數'] / op_station_df['Max_Possible_Output'], 
+                0
+            )
+            
+            total_qty = op_station_df['正測顆數'].sum()
+            total_machines = op_station_df['開機數'].sum()
+            total_machine_days = (op_station_df['開機數'] * op_station_df['OEE']).sum()
+            
+            osat_implied_max = total_qty / total_machine_days if total_machine_days > 0 else 0
+            osat_avg_oee = op_station_df['OEE'].mean() * 100
+            osat_actual_upd = total_qty / total_machines if total_machines > 0 else 0
+            
+            # --- 動態差異分析邏輯 (Dynamic Variance Logic) ---
+            if is_ate_track:
+                osat_speed_val = (86400 / osat_implied_max) * int(calc_site) if osat_implied_max > 0 else 0
+                speed_gap = osat_speed_val - ie_speed_val # 對 T.T 來說，正數代表變慢(壞事)
+                is_speed_error = speed_gap > 2.0
+                speed_gap_label = "T.T GAP (Speed Variance)" if is_speed_error else "T.T GAP"
+            else:
+                osat_speed_val = osat_implied_max / 24 # 反推 UPH
+                speed_gap = osat_speed_val - ie_speed_val # 對 UPH 來說，負數代表變慢(壞事)
+                is_speed_error = speed_gap < -(ie_speed_val * 0.05) # 容許 5% 誤差
+                speed_gap_label = "UPH GAP (Below Target)" if is_speed_error else "UPH GAP"
+
+            # 速度與數字格式化
+            ie_speed_str = f"{ie_speed_val:.1f}" if is_ate_track else f"{ie_speed_val:,.0f}"
+            osat_speed_str = f"{osat_speed_val:.1f}" if is_ate_track else f"{osat_speed_val:,.0f}"
+            speed_gap_str = f"+{speed_gap:.1f}" if (is_ate_track and speed_gap > 0) else (f"+{speed_gap:,.0f}" if (not is_ate_track and speed_gap > 0) else (f"{speed_gap:.1f}" if is_ate_track else f"{speed_gap:,.0f}"))
+
+            output_gap = osat_actual_upd - ie_target_upd
+            is_out_error = output_gap < -(ie_target_upd * 0.05)
+            out_label = "Out GAP (Below Target)" if is_out_error else "Out GAP"
+            out_val = f"+{output_gap:,.0f}" if output_gap > 0 else f"{output_gap:,.0f}"
+
+            # ==========================================
+            # 🎨 Display Alignment Dashboard (Dynamic UI)
+            # ==========================================
+            osat_tabs = st.tabs(["🎯 Operation (OEE Alignment)", "📉 Tester Health & Waste", "🕵️ Cross-Validation & RCA"])
+            
+            with osat_tabs[0]:
+                st.markdown("### ⚖️ Performance Alignment: Internal Target vs. OSAT Reported")
                 col1, col2, col3 = st.columns(3)
                 
-                # HTML Helper Function for KPI rows (Col 1 & Col 2)
                 def kpi_row(label, value, unit, val_color, is_last=False):
                     border_style = "none" if is_last else "1px solid rgba(0,0,0,0.06)"
                     padding_btm = "0" if is_last else "10px"
                     margin_btm = "0" if is_last else "10px"
-                    return f"""
-                    <div style='display: flex; justify-content: space-between; align-items: baseline; border-bottom: {border_style}; padding-bottom: {padding_btm}; margin-bottom: {margin_btm};'>
-                        <span style='font-size: 12px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;'>{label}</span>
-                        <span style='font-size: 22px; color: {val_color}; font-weight: 800; line-height: 1;'>{value} <span style='font-size: 12px; color: #94a3b8; font-weight: 600;'>{unit}</span></span>
-                    </div>
-                    """
+                    return f"<div style='display: flex; justify-content: space-between; align-items: baseline; border-bottom: {border_style}; padding-bottom: {padding_btm}; margin-bottom: {margin_btm};'><span style='font-size: 12px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;'>{label}</span><span style='font-size: 22px; color: {val_color}; font-weight: 800; line-height: 1;'>{value} <span style='font-size: 12px; color: #94a3b8; font-weight: 600;'>{unit}</span></span></div>"
                 
                 with col1:
                     st.markdown("**🎯 Internal Target**")
-                    html_col1 = f"""
-                    <div style='background-color: #f0f9ff; padding: 18px 20px; border-radius: 8px; border: 1px solid #bae6fd; display: flex; flex-direction: column; justify-content: space-between; height: 190px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>
-                        {kpi_row("MAX", f"{ie_max_upd:,.0f}", "ea", "#0369a1")}
-                        {kpi_row("TT", f"{calc_test_time:.1f}", "s", "#0369a1")}
-                        {kpi_row("OEE", f"{ie_oee:.1f}", "%", "#0369a1")}
-                        {kpi_row("Target", f"{ie_target_upd:,.0f}", "ea", "#0284c7", is_last=True)}
-                    </div>
-                    """
+                    html_col1 = f"<div style='background-color: #f0f9ff; padding: 18px 20px; border-radius: 8px; border: 1px solid #bae6fd; display: flex; flex-direction: column; justify-content: space-between; height: 190px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>{kpi_row('MAX', f'{ie_max_upd:,.0f}', 'ea', '#0369a1')}{kpi_row(speed_label, ie_speed_str, speed_unit, '#0369a1')}{kpi_row('OEE', f'{ie_oee:.1f}', '%', '#0369a1')}{kpi_row('Target', f'{ie_target_upd:,.0f}', 'ea', '#0284c7', is_last=True)}</div>"
                     st.markdown(html_col1, unsafe_allow_html=True)
                     
                 with col2:
-                    st.markdown("**🏭 OSAT Actual Data**")
-                    html_col2 = f"""
-                    <div style='background-color: #fffbeb; padding: 18px 20px; border-radius: 8px; border: 1px solid #fde68a; display: flex; flex-direction: column; justify-content: space-between; height: 190px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>
-                        {kpi_row("MAX", f"{osat_implied_max:,.0f}", "ea", "#b45309")}
-                        {kpi_row("Implied TT", f"{osat_implied_tt:.1f}", "s", "#b45309")}
-                        {kpi_row("OEE", f"{osat_avg_oee:.1f}", "%", "#b45309")}
-                        {kpi_row("Actual", f"{osat_actual_upd:,.0f}", "ea", "#d97706", is_last=True)}
-                    </div>
-                    """
+                    st.markdown("**🏭 OSAT Implied Baseline**")
+                    html_col2 = f"<div style='background-color: #fffbeb; padding: 18px 20px; border-radius: 8px; border: 1px solid #fde68a; display: flex; flex-direction: column; justify-content: space-between; height: 190px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>{kpi_row('MAX', f'{osat_implied_max:,.0f}', 'ea', '#b45309')}{kpi_row(f'Implied {speed_label}', osat_speed_str, speed_unit, '#b45309')}{kpi_row('OEE', f'{osat_avg_oee:.1f}', '%', '#b45309')}{kpi_row('Actual', f'{osat_actual_upd:,.0f}', 'ea', '#d97706', is_last=True)}</div>"
                     st.markdown(html_col2, unsafe_allow_html=True)
                     
                 with col3:
                     st.markdown("**📊 Variance Analysis**")
-                    
-                    # HTML Helper Function for Alert boxes (Col 3) - Removed Icons & Locked Height to 88px
                     def alert_box(label, value, unit, is_error, is_last=False):
                         bg = "#fef2f2" if is_error else "#f0fdf4"
                         border = "#fecaca" if is_error else "#bbf7d0"
                         text = "#991b1b" if is_error else "#166534"
                         margin_btm = "0" if is_last else "14px"
                         return f"<div style='background-color: {bg}; padding: 0 18px; border-radius: 8px; border: 1px solid {border}; display: flex; flex-direction: column; justify-content: center; height: 88px; box-sizing: border-box; margin-bottom: {margin_btm}; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'><div style='font-size: 11px; color: {text}; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; opacity: 0.8; letter-spacing: 0.5px;'>{label}</div><div style='display: flex; justify-content: space-between; align-items: center;'><div><span style='font-size: 24px; color: {text}; font-weight: 800; line-height: 1;'>{value}</span> <span style='font-size: 13px; font-weight: 600;'>{unit}</span></div></div></div>"
-                        
-                    # TT Variance Evaluation
-                    is_tt_error = tt_gap > 2.0
-                    tt_label = "TT GAP (Speed Variance)" if is_tt_error else "TT GAP"
-                    tt_val = f"+{tt_gap:.1f}" if tt_gap > 0 else f"{tt_gap:.1f}"
-                        
-                    # Output Variance Evaluation
-                    is_out_error = output_gap < -(ie_target_upd * 0.05)
-                    out_label = "Out GAP (Below Target)" if is_out_error else "Out GAP"
-                    out_val = f"+{output_gap:,.0f}" if output_gap > 0 else f"{output_gap:,.0f}"
                     
-                    # Outer container locked to exactly 190px (88 + 14 + 88 = 190)
-                    html_col3 = f"<div style='display: flex; flex-direction: column; height: 190px; box-sizing: border-box;'>{alert_box(tt_label, tt_val, 's', is_tt_error)}{alert_box(out_label, out_val, 'ea', is_out_error, is_last=True)}</div>"
-                    
+                    html_col3 = f"<div style='display: flex; flex-direction: column; height: 190px; box-sizing: border-box;'>{alert_box(speed_gap_label, speed_gap_str, speed_unit, is_speed_error)}{alert_box(out_label, out_val, 'ea', is_out_error, is_last=True)}</div>"
                     st.markdown(html_col3, unsafe_allow_html=True)
 
                 st.write("")
