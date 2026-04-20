@@ -1028,13 +1028,17 @@ with main_tabs[2]:
                     
                     # 🧠 智慧分流邏輯
                     op_upper = str(op).upper()
-                    if op_upper == "SLT":
+                    
+                    if op_upper.startswith("SLT") or op_upper.startswith("MT"):
+                        # 將 SLT, MT1, MT2 等歸類為 SLT
                         category_mapping["SLT"].append(op)
-                    elif (op_upper.startswith("FT") and "CHECK" not in op_upper) or op_upper.startswith("MT"):
-                        # 將 FT1, FTA, FT2, FT3, MT1 歸類為 ATE (排除 FTCHECKCORR)
+                        
+                    elif op_upper.startswith("FT") and "CHECK" not in op_upper:
+                        # 將 FT1, FTA, FT2, FT3 歸類為 ATE (完美排除 FTCHECKCORR)
                         category_mapping["ATE"].append(op)
+                        
                     else:
-                        # 將 L/S, T/R, FQC, FTCHECKCORR 等歸類為 AOI
+                        # 剩下的 L/S, T/R, FQC, FTCHECKCORR 等歸類為 AOI (後段/檢驗)
                         category_mapping["AOI (Backend/Insp.)"].append(op)
         
         # 濾除沒有任何站點的空分類 (避免選單出現空殼)
