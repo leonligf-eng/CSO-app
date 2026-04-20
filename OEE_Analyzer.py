@@ -1044,10 +1044,11 @@ with main_tabs[2]:
         # 濾除沒有任何站點的空分類 (避免選單出現空殼)
         active_categories = {k: v for k, v in category_mapping.items() if len(v) > 0}
         
-        st.markdown("#### 🔍 Equipment & Station Filter")
+        st.markdown("#### 🔍 Equipment & Station Filter")st.markdown("#### 🔍 Equipment & Station Filter")
         
-        # 🎨 UI 美化：雙層連動選擇器 (使用 Columns 排版)
-        col_cat, col_st, _ = st.columns([1.5, 2, 1])
+        # 🎨 UI 美化：四等分「指揮中心」排版 (Command Center Layout)
+        # 比例微調：分類名字較長佔 1.6，站點 1.4，後面兩個數字輸入框各佔 1.2
+        col_cat, col_st, col_uph, col_oee = st.columns([1.6, 1.4, 1.2, 1.2])
         
         with col_cat:
             # 第一層：大分類 (水平按鈕，簡潔明瞭)
@@ -1081,8 +1082,12 @@ with main_tabs[2]:
             
             if is_ate_track:
                 # 🚂 軌道一：ATE 模式 (連動全域計算機)
-                st.caption(f"🔗 **Linked to Global Capacity Calculator** (TT: {calc_test_time}s, Site: {calc_site})")
-                
+                # 巧妙利用右側兩個空下來的欄位，顯示 ATE 專屬的提示，維持視覺平衡
+                with col_uph:
+                    st.markdown("<div style='padding-top: 36px; font-size: 13px; color: #64748b;'>🔗 Linked to Global Calc</div>", unsafe_allow_html=True)
+                with col_oee:
+                    st.markdown(f"<div style='padding-top: 36px; font-size: 13px; color: #0369a1; font-weight: 700;'>T.T: {calc_test_time}s | Site: {calc_site}</div>", unsafe_allow_html=True)
+                    
                 ie_max_upd = (86400 / calc_test_time) * int(calc_site) if calc_test_time > 0 else 0
                 ie_target_upd = single_cap
                 ie_oee = calc_oee
@@ -1093,12 +1098,11 @@ with main_tabs[2]:
                 
             else:
                 # 🚀 軌道二：SLT / AOI 模式 (Local 本地輸入)
-                st.info(f"💡 **{selected_cat} Mode**: Independent from Global Calculator. Please define standard parameters.")
-                col_local1, col_local2 = st.columns(2)
-                with col_local1:
-                    std_uph = st.number_input("Standard UPH (ea/hr)", min_value=1, value=1000, step=100)
-                with col_local2:
-                    local_target_oee = st.number_input("Target OEE %", min_value=0.0, max_value=100.0, value=85.0, step=1.0)
+                # 直接在同一排顯示輸入框，維持緊湊俐落的版面
+                with col_uph:
+                    std_uph = st.number_input("3. Standard UPH", min_value=1, value=1000, step=100)
+                with col_oee:
+                    local_target_oee = st.number_input("4. Target OEE %", min_value=0.0, max_value=100.0, value=85.0, step=1.0)
                 
                 ie_max_upd = std_uph * 24
                 ie_target_upd = ie_max_upd * (local_target_oee / 100.0)
