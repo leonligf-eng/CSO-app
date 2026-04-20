@@ -1012,26 +1012,55 @@ with main_tabs[2]:
     if not osat_db:
         st.warning("⚠️ Cannot parse OSAT report. Please ensure the uploaded Excel contains a 'Daily XOEE of ...' sheet.")
     else:
-        # 🌟 核心升級：在背景自動掃描所有站點並攤平，完全隱藏 Excel 的分頁結構
+        # 🌟 核心升級：自動掃描並進行「智慧分類 (Smart Categorization)」
         op_to_process = {}
         all_osat_ops = []
+        
+        # 定義分類字典 (對應您的需求)
+        category_mapping = {"ATE": [], "SLT": [], "AOI (Backend/Insp.)": []}
+        
         for proc, dfs in osat_db.items():
             ops = dfs['station']['站點'].unique().tolist()
             for op in ops:
                 if op not in all_osat_ops:
                     all_osat_ops.append(op)
-                    op_to_process[op] = proc # 記住這個站點對應的底層 Sheet (例如 FT 或 SLT)
+                    op_to_process[op] = proc
+                    
+                    # 🧠 智慧分流邏輯
+                    op_upper = str(op).upper()
+                    if op_upper == "SLT":
+                        category_mapping["SLT"].append(op)
+                    elif (op_upper.startswith("FT") and "CHECK" not in op_upper) or op_upper.startswith("MT"):
+                        # 將 FT1, FTA, FT2, FT3, MT1 歸類為 ATE (排除 FTCHECKCORR)
+                        category_mapping["ATE"].append(op)
+                    else:
+                        # 將 L/S, T/R, FQC, FTCHECKCORR 等歸類為 AOI
+                        category_mapping["AOI (Backend/Insp.)"].append(op)
         
-        st.markdown("#### 🔍 Select Station")
-        # 只保留一個最直覺的下拉選單
-        selected_osat_op = st.selectbox(
-            "Operation:", 
-            options=all_osat_ops, 
-            label_visibility="collapsed",
-            help="Select the specific testing station (e.g., FT1, FTA, SLT, AOI)"
-        )
+        # 濾除沒有任何站點的空分類 (避免選單出現空殼)
+        active_categories = {k: v for k, v in category_mapping.items() if len(v) > 0}
         
-        # 程式在背景自動提取對應的資料表，不勞煩使用者
+        st.markdown("#### 🔍 Equipment & Station Filter")
+        
+        # 🎨 UI 美化：雙層連動選擇器 (使用 Columns 排版)
+        col_cat, col_st, _ = st.columns([1.5, 2, 1])
+        
+        with col_cat:
+            # 第一層：大分類 (水平按鈕，簡潔明瞭)
+            selected_cat = st.radio(
+                "1. Equipment Group", 
+                options=list(active_categories.keys()), 
+                horizontal=True
+            )
+            
+        with col_st:
+            # 第二層：具體站點 (動態連動第一層的選項)
+            selected_osat_op = st.selectbox(
+                "2. Target Station", 
+                options=active_categories[selected_cat]
+            )
+        
+        # 提取使用者最終選擇的站點資料
         selected_process = op_to_process[selected_osat_op]
         df_station = osat_db[selected_process]['station']
         df_machine = osat_db[selected_process]['machine']
