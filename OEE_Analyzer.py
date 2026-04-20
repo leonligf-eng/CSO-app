@@ -1095,7 +1095,7 @@ with main_tabs[2]:
                     html_col1 = f"""
                     <div style='background-color: #f0f9ff; padding: 18px 20px; border-radius: 8px; border: 1px solid #bae6fd; display: flex; flex-direction: column; justify-content: space-between; height: 190px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>
                         {kpi_row("MAX", f"{ie_max_upd:,.0f}", "ea", "#0369a1")}
-                        {kpi_row("T.T", f"{calc_test_time:.1f}", "s", "#0369a1")}
+                        {kpi_row("TT", f"{calc_test_time:.1f}", "s", "#0369a1")}
                         {kpi_row("OEE", f"{ie_oee:.1f}", "%", "#0369a1")}
                         {kpi_row("Target", f"{ie_target_upd:,.0f}", "ea", "#0284c7", is_last=True)}
                     </div>
@@ -1107,7 +1107,7 @@ with main_tabs[2]:
                     html_col2 = f"""
                     <div style='background-color: #fffbeb; padding: 18px 20px; border-radius: 8px; border: 1px solid #fde68a; display: flex; flex-direction: column; justify-content: space-between; height: 190px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>
                         {kpi_row("MAX", f"{osat_implied_max:,.0f}", "ea", "#b45309")}
-                        {kpi_row("Implied T.T", f"{osat_implied_tt:.1f}", "s", "#b45309")}
+                        {kpi_row("Implied TT", f"{osat_implied_tt:.1f}", "s", "#b45309")}
                         {kpi_row("OEE", f"{osat_avg_oee:.1f}", "%", "#b45309")}
                         {kpi_row("Actual", f"{osat_actual_upd:,.0f}", "ea", "#d97706", is_last=True)}
                     </div>
@@ -1125,9 +1125,9 @@ with main_tabs[2]:
                         margin_btm = "0" if is_last else "14px"
                         return f"<div style='background-color: {bg}; padding: 0 18px; border-radius: 8px; border: 1px solid {border}; display: flex; flex-direction: column; justify-content: center; height: 88px; box-sizing: border-box; margin-bottom: {margin_btm}; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'><div style='font-size: 11px; color: {text}; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; opacity: 0.8; letter-spacing: 0.5px;'>{label}</div><div style='display: flex; justify-content: space-between; align-items: center;'><div><span style='font-size: 24px; color: {text}; font-weight: 800; line-height: 1;'>{value}</span> <span style='font-size: 13px; font-weight: 600;'>{unit}</span></div></div></div>"
                         
-                    # T.T Variance Evaluation
+                    # TT Variance Evaluation
                     is_tt_error = tt_gap > 2.0
-                    tt_label = "T.T GAP (Speed Variance)" if is_tt_error else "T.T GAP"
+                    tt_label = "TT GAP (Speed Variance)" if is_tt_error else "TT GAP"
                     tt_val = f"+{tt_gap:.1f}" if tt_gap > 0 else f"{tt_gap:.1f}"
                         
                     # Output Variance Evaluation
