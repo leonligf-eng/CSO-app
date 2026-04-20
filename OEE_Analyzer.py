@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go # 🌟 新增：用於繪製 OSAT 雙軌對比圖與堆疊圖
 from datetime import datetime, timedelta, time
 import io
 import uuid
@@ -147,7 +148,7 @@ st.markdown("""
 st.markdown("# 📈 ATE OEE Analyzer")
 
 # ==============================================================================
-# --- 0. Mock Data Generator ---
+# --- 0. Mock Data Generator (IE Log) ---
 # ==============================================================================
 @st.cache_data
 def generate_mock_data():
@@ -244,11 +245,101 @@ def load_data(file):
             return None
     return generate_mock_data()
 
+# ==============================================================================
+# --- 🌟 NEW: OSAT PP Output Pipeline & Mock Generator ---
+# ==============================================================================
+@st.cache_data
+def generate_osat_mock_file():
+    # Create Station Level Data (Sheet 1)
+    station_data = [
+        ["FT1", "2026/4/1", "ZC13", 5, "90.23%", "90.23%", "0%", "71.76%", "76.33%", 16285, 17844, 15693, 7200, "84.6%", "10.18%", "1.01%", "0%", "0%", "4.1%", "0%", "0%", "0%", "0%", "0.11%", "0%", "76.33%"],
+        ["FTA", "2026/4/1", "ZC13", 0, "0%", "0%", "0%", "0%", "0%", 0, 0, 0, 1440, "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%"],
+        ["FT1", "2026/4/2", "ZC13", 6.79, "90.57%", "92.1%", "1.62%", "77.65%", "66.05%", 20916, 22656, 19963, 10687, "79.7%", "7.73%", "4.7%", "0%", "0%", "4.19%", "0%", "0%", "1.42%", "8.5%", "2.25%", "0%", "72.19%"],
+        ["FTA", "2026/4/2", "ZC13", 1.28, "77.34%", "77.34%", "0%", "0%", "31.62%", 21486, 21488, 21485, 3681, "81.35%", "1.46%", "10.54%", "0%", "0%", "1.89%", "0%", "0%", "0%", "49.74%", "4.76%", "0%", "62.92%"],
+        ["FT1", "2026/4/3", "ZC13", 9, "88.04%", "89.9%", "2.08%", "71.55%", "80.77%", 31018, 32181, 29408, 12960, "91.74%", "4.42%", "0.69%", "0%", "0%", "2.95%", "0%", "0%", "0%", "0%", "0.19%", "0%", "80.77%"],
+        ["FTA", "2026/4/3", "ZC13", 0.18, "80.83%", "80.83%", "0%", "0%", "14.93%", 3969, 3969, 3969, 1440, "100%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "81.53%", "0%", "0%", "80.83%"]
+    ]
+    station_cols = ["站點", "日期", "產品群組", "開機數", "E%", "E_DO1%", "DutOff%", "重工效率", "總產出效率", "正測顆數", "測試顆數", "產出良品數", "生產時間", "Run", "Rework", "SetUp", "Corr", "Clean", "Down", "E1", "E2", "PM", "Idle", "Other", "EQC", "OEE%"]
+    df_station = pd.DataFrame(station_data, columns=station_cols)
+
+    # Create Tester Level Data (Sheet 2) - Includes ghost testers
+    machine_data = [
+        ["HP93000-EXA", "HP93K-EXA02", 0, "2026/4/1", "ZC13", "0%", "0%", "0%", "0%", "0%", 0, 0, 0, 720, "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%"],
+        ["HP93000-EXA", "HP93K-EXA05", 0, "2026/4/1", "ZC13", "0%", "0%", "0%", "0%", "0%", 0, 0, 0, 720, "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%"],
+        ["HP93000-EXA", "HP93K-EXA06", 1, "2026/4/1", "ZC13", "91.24%", "91.24%", "0%", "70.75%", "70.9%", 3026, 3557, 3092, 1440, "77.71%", "17.57%", "1.6%", "0%", "0%", "3.12%", "0%", "0%", "0%", "0%", "0%", "0%", "70.9%"],
+        ["HP93000-EXA", "HP93K-EXA10", 1, "2026/4/1", "ZC13", "88.36%", "88.36%", "0%", "46.38%", "77.99%", 3328, 3423, 3046, 1440, "88.26%", "4.79%", "1.94%", "0%", "0%", "4.44%", "0%", "0%", "0%", "0%", "0.56%", "0%", "77.99%"],
+        ["HP93000-EXA", "HP93K-EXA04", 0.48, "2026/4/2", "ZC13", "75.08%", "75.08%", "0%", "0%", "33.38%", 8407, 8409, 8406, 1363, "86.94%", "3.87%", "9.04%", "0%", "0%", "0%", "0%", "0%", "0%", "48.86%", "0.14%", "0%", "65.28%"],
+        ["HP93000-EXA", "HP93K-EXA11", 1, "2026/4/2", "ZC13", "92.95%", "92.95%", "0%", "81.13%", "61.32%", 2617, 3382, 2724, 1440, "65.97%", "22.08%", "5.14%", "0%", "0%", "3.47%", "0%", "0%", "0%", "0%", "3.33%", "0%", "61.32%"],
+        ["HP93000-EXA", "HP93K-EXA04", 0.18, "2026/4/3", "ZC13", "80.83%", "80.83%", "0%", "0%", "29.86%", 3969, 3969, 3969, 720, "100%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "63.06%", "0%", "0%", "80.83%"],
+        ["HP93000-EXA", "HP93K-EXA17", 0, "2026/4/3", "ZC13", "0%", "0%", "0%", "0%", "0%", 0, 0, 0, 720, "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%"]
+    ]
+    machine_cols = ["機台群組", "機台代號", "開機數", "日期", "產品群組", "E%", "E_DO1%", "DutOff%", "重工效率", "總產出效率", "正測顆數", "測試顆數", "產出良品數", "生產時間", "Run", "Rework", "SetUp", "Corr", "Clean", "Down", "E1", "E2", "PM", "Idle", "Other", "EQC", "OEE"]
+    df_machine = pd.DataFrame(machine_data, columns=machine_cols)
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output) as writer:
+        df_station.to_excel(writer, sheet_name="Daily XOEE of FT", index=False)
+        df_machine.to_excel(writer, sheet_name="FT", index=False)
+    return output.getvalue()
+
+def clean_percentage(val):
+    """Safely convert string percentages (e.g., '90.23%') from report to float (0.9023)"""
+    if pd.isna(val): return 0.0
+    if isinstance(val, str) and '%' in val:
+        try:
+            return float(val.replace('%', '').strip()) / 100.0
+        except:
+            return 0.0
+    elif isinstance(val, (int, float)):
+        return float(val)
+    return 0.0
+
+@st.cache_data
+def load_osat_data(file_bytes):
+    try:
+        xls = pd.ExcelFile(file_bytes)
+        sheet_names = xls.sheet_names
+        processed_data = {}
+        
+        for sheet in sheet_names:
+            if sheet.startswith("Daily XOEE of"):
+                process_group = sheet.replace("Daily XOEE of", "").strip()
+                if process_group in sheet_names:
+                    df_station = pd.read_excel(xls, sheet_name=sheet)
+                    df_station['日期'] = pd.to_datetime(df_station['日期']).dt.date
+                    df_station = df_station.rename(columns={'OEE%': 'OEE'})
+                    
+                    pct_cols = ['E%', 'E_DO1%', 'DutOff%', '重工效率', '總產出效率', 'Run', 'Rework', 'SetUp', 'Down', 'Idle', 'PM', 'Other', 'OEE']
+                    for col in pct_cols:
+                        if col in df_station.columns: df_station[col] = df_station[col].apply(clean_percentage)
+                            
+                    df_machine = pd.read_excel(xls, sheet_name=process_group)
+                    df_machine['日期'] = pd.to_datetime(df_machine['日期']).dt.date
+                    for col in pct_cols:
+                        if col in df_machine.columns: df_machine[col] = df_machine[col].apply(clean_percentage)
+                            
+                    # 🛡️ Ironclad Defense: Remove ghost testers
+                    mask_ghost = (df_machine['開機數'] == 0) & (df_machine['正測顆數'] == 0)
+                    df_machine_clean = df_machine[~mask_ghost].copy()
+                    
+                    processed_data[process_group] = {
+                        "station": df_station,
+                        "machine": df_machine_clean
+                    }
+        return processed_data
+    except Exception as e:
+        return None
 
 # ==============================================================================
 # --- 🌟 核心防護網：檔案變更與全面狀態清理 (File Change Detector) ---
 # ==============================================================================
-uploaded_file = st.sidebar.file_uploader("Upload Yield Report", type=["xlsx", "xls", "ods"])
+st.sidebar.markdown("## 📂 OSAT Yield Report Inputs")
+uploaded_file = st.sidebar.file_uploader("Upload Yield Report", type=["xlsx", "xls", "ods"], key="ie_uploader")
+
+# 🌟 新增： OSAT 上傳區塊
+st.sidebar.divider()
+st.sidebar.markdown("## 🏭 OSAT PP Report Inputs")
+osat_uploaded_file = st.sidebar.file_uploader("Upload PP Output (Daily XOEE & Details)", type=["xlsx", "xls"], key="osat_uploader")
 
 # 判定目前是真實檔案還是假資料
 current_file_name = uploaded_file.name if uploaded_file is not None else "mock_data"
@@ -292,8 +383,9 @@ st.sidebar.divider()
 
 # ==============================================================================
 # --- 頂層架構切分 (Main Tabs) ---
+# 🌟 修改：新增了第三個 Tab 專供 OSAT Monitor 使用
 # ==============================================================================
-main_tabs = st.tabs(["📊 OEE Analyzer", "🧬 Overall Build Yield"])
+main_tabs = st.tabs(["📊 OEE Analyzer", "🧬 Overall Build Yield", "🏭 OSAT OEE Monitor"])
 
 # ==============================================================================
 # --- 🧬 Tab 2: Overall Build Yield Tracking ---
@@ -680,9 +772,8 @@ with main_tabs[1]:
             html_out += '</tbody></table></div>'
             st.write(html_out, unsafe_allow_html=True)
 
-
 # ==============================================================================
-# --- 📊 Tab 1: OEE Analyzer ---
+# --- 📊 Tab 1 執行區段 (含共用 Calculator 變數宣告) ---
 # ==============================================================================
 with main_tabs[0]:
     # ==============================================================================
@@ -837,7 +928,6 @@ with main_tabs[0]:
         c_btn3.button("+ 4 Weeks", use_container_width=True, on_click=update_date_range, kwargs={"days": 28})
         c_btn4.button("Max Range", use_container_width=True, on_click=update_date_range, kwargs={"to_max": True})
 
-
     mask_stage_3 = (
         (filtered_by_op_prog['CheckInTime'].dt.date <= end_date) & 
         (filtered_by_op_prog['CheckOutTime'].dt.date >= start_date) &
@@ -861,11 +951,11 @@ with main_tabs[0]:
 
     st.divider()
 
-    # ==============================================================================
-    # --- 2. Sidebar Settings (Calculator & Targets) ---
-    # ==============================================================================
-
-    st.sidebar.header("🧮 Capacity Calculator")
+    # -------------------------------------------------------------------------
+    # --- 🧮 共用變數宣告區：Capacity Calculator
+    #     這段變數不僅供應給本 Tab 的 IE OEE，也將餵給 Tab 3 的 OSAT 照妖鏡
+    # -------------------------------------------------------------------------
+    st.sidebar.header("🧮 Target Capacity Calculator")
     with st.sidebar.expander("Detailed Parameters", expanded=False):
         calc_lot_size = st.number_input("Lot Size", value=6600, step=100)
         calc_site = st.selectbox("Site", options=[1, 2, 4, 8, 16, 32, 64, 128, 256], index=3)
@@ -874,14 +964,14 @@ with main_tabs[0]:
         calc_oee = st.number_input("OEE %", value=70.00, step=1.00, format="%.2f")
         
         if calc_test_time > 0:
-            single_cap = (86400 / calc_test_time) * calc_site * (calc_oee / 100.0) * (calc_fpy / 100.0)
+            single_cap = (86400 / calc_test_time) * int(calc_site) * (calc_oee / 100.0) * (calc_fpy / 100.0)
         else:
             single_cap = 0
             
         st.markdown(f"""
             <div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px; border: 1px solid #dee2e6; text-align: center;'>
                 <div style='font-size: 11px; color: #6c757d; font-weight: bold; text-transform: uppercase; margin-bottom: 5px; letter-spacing: 0.5px;'>
-                    Single Capacity (UPD)
+                    Target Single Capacity (UPD)
                 </div>
                 <div style='font-size: 26px; color: #1E3A8A; font-weight: bold;'>
                     🚀 {single_cap:,.0f} <span style='font-size: 13px; color: #6c757d;'>units/day</span>
@@ -903,6 +993,238 @@ with main_tabs[0]:
             targets[op] = {'theo': theo, 'plan': plan}
             st.sidebar.write("") 
 
+# ==============================================================================
+# --- 🏭 Tab 3: OSAT OEE Monitor Execution Section (Bypasses bottom st.stop) ---
+# ==============================================================================
+with main_tabs[2]:
+    st.markdown("## 🏭 OSAT OEE Review Dashboard")
+    st.caption("Cross-validating equipment efficiency using internal expected output and OSAT reported data.")
+    
+    # Execute data loading
+    osat_file_bytes = osat_uploaded_file.getvalue() if osat_uploaded_file else generate_osat_mock_file()
+    osat_db = load_osat_data(osat_file_bytes)
+    
+    if not osat_db:
+        st.warning("⚠️ Cannot parse OSAT report. Please ensure the uploaded Excel contains a 'Daily XOEE of ...' sheet.")
+    else:
+        # 🌟 核心升級：在背景自動掃描所有站點並攤平，完全隱藏 Excel 的分頁結構
+        op_to_process = {}
+        all_osat_ops = []
+        for proc, dfs in osat_db.items():
+            ops = dfs['station']['站點'].unique().tolist()
+            for op in ops:
+                if op not in all_osat_ops:
+                    all_osat_ops.append(op)
+                    op_to_process[op] = proc # 記住這個站點對應的底層 Sheet (例如 FT 或 SLT)
+        
+        st.markdown("#### 🔍 Select Station")
+        # 只保留一個最直覺的下拉選單
+        selected_osat_op = st.selectbox(
+            "Operation:", 
+            options=all_osat_ops, 
+            label_visibility="collapsed",
+            help="Select the specific testing station (e.g., FT1, FTA, SLT, AOI)"
+        )
+        
+        # 程式在背景自動提取對應的資料表，不勞煩使用者
+        selected_process = op_to_process[selected_osat_op]
+        df_station = osat_db[selected_process]['station']
+        df_machine = osat_db[selected_process]['machine']
+            
+        op_station_df = df_station[df_station['站點'] == selected_osat_op].copy()
+        
+        if op_station_df.empty:
+            st.info("No data available for this operation.")
+        else:
+            st.divider()
+            osat_tabs = st.tabs(["🎯 Operation (OEE Alignment)", "🏥 Tester Health & Waste", "🕵️ Cross-Validation & RCA"])
+            
+            # --- 🟢 Module A: Performance Alignment ---
+            with osat_tabs[0]:
+                st.markdown("### ⚖️ OEE Alignment: Internal Target vs. OSAT Reported")
+                
+                # Core True OEE Calculation
+                op_station_df['Expected_Output'] = op_station_df['開機數'] * single_cap
+                op_station_df['True_OEE'] = np.where(op_station_df['Expected_Output'] > 0, op_station_df['正測顆數'] / op_station_df['Expected_Output'], 0)
+                
+                # --- 🎯 Implied Baseline Engine (4-Dimension Breakdown) ---
+                total_qty = op_station_df['正測顆數'].sum()
+                total_machines = op_station_df['開機數'].sum()
+                total_machine_days = (op_station_df['開機數'] * op_station_df['OEE']).sum()
+                
+                # [1. Internal IE Standard]
+                ie_max_upd = (86400 / calc_test_time) * int(calc_site) if calc_test_time > 0 else 0
+                ie_oee = calc_oee
+                ie_target_upd = single_cap 
+                
+                # [2. OSAT Actual Data]
+                osat_implied_max = total_qty / total_machine_days if total_machine_days > 0 else 0
+                osat_implied_tt = (86400 / osat_implied_max) * int(calc_site) if osat_implied_max > 0 else 0 
+                osat_avg_oee = op_station_df['OEE'].mean() * 100
+                osat_actual_upd = total_qty / total_machines if total_machines > 0 else 0
+                
+                # [3. Variance Calculation]
+                max_gap = osat_implied_max - ie_max_upd
+                tt_gap = osat_implied_tt - calc_test_time 
+                output_gap = osat_actual_upd - ie_target_upd
+
+                # ==========================================
+                # Display Alignment Dashboard (Pixel-Perfect Layout)
+                # ==========================================
+                col1, col2, col3 = st.columns(3)
+                
+                # HTML Helper Function for KPI rows (Col 1 & Col 2)
+                def kpi_row(label, value, unit, val_color, is_last=False):
+                    border_style = "none" if is_last else "1px solid rgba(0,0,0,0.06)"
+                    padding_btm = "0" if is_last else "10px"
+                    margin_btm = "0" if is_last else "10px"
+                    return f"""
+                    <div style='display: flex; justify-content: space-between; align-items: baseline; border-bottom: {border_style}; padding-bottom: {padding_btm}; margin-bottom: {margin_btm};'>
+                        <span style='font-size: 12px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;'>{label}</span>
+                        <span style='font-size: 22px; color: {val_color}; font-weight: 800; line-height: 1;'>{value} <span style='font-size: 12px; color: #94a3b8; font-weight: 600;'>{unit}</span></span>
+                    </div>
+                    """
+                
+                with col1:
+                    st.markdown("**🎯 Internal Target**")
+                    html_col1 = f"""
+                    <div style='background-color: #f0f9ff; padding: 18px 20px; border-radius: 8px; border: 1px solid #bae6fd; display: flex; flex-direction: column; justify-content: space-between; height: 190px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>
+                        {kpi_row("MAX", f"{ie_max_upd:,.0f}", "ea", "#0369a1")}
+                        {kpi_row("T.T", f"{calc_test_time:.1f}", "s", "#0369a1")}
+                        {kpi_row("OEE", f"{ie_oee:.1f}", "%", "#0369a1")}
+                        {kpi_row("Target", f"{ie_target_upd:,.0f}", "ea", "#0284c7", is_last=True)}
+                    </div>
+                    """
+                    st.markdown(html_col1, unsafe_allow_html=True)
+                    
+                with col2:
+                    st.markdown("**🏭 OSAT Actual Data**")
+                    html_col2 = f"""
+                    <div style='background-color: #fffbeb; padding: 18px 20px; border-radius: 8px; border: 1px solid #fde68a; display: flex; flex-direction: column; justify-content: space-between; height: 190px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>
+                        {kpi_row("MAX", f"{osat_implied_max:,.0f}", "ea", "#b45309")}
+                        {kpi_row("Implied T.T", f"{osat_implied_tt:.1f}", "s", "#b45309")}
+                        {kpi_row("OEE", f"{osat_avg_oee:.1f}", "%", "#b45309")}
+                        {kpi_row("Actual", f"{osat_actual_upd:,.0f}", "ea", "#d97706", is_last=True)}
+                    </div>
+                    """
+                    st.markdown(html_col2, unsafe_allow_html=True)
+                    
+                with col3:
+                    st.markdown("**📊 Variance Analysis**")
+                    
+                    # HTML Helper Function for Alert boxes (Col 3) - Removed Icons & Locked Height to 88px
+                    def alert_box(label, value, unit, is_error, is_last=False):
+                        bg = "#fef2f2" if is_error else "#f0fdf4"
+                        border = "#fecaca" if is_error else "#bbf7d0"
+                        text = "#991b1b" if is_error else "#166534"
+                        margin_btm = "0" if is_last else "14px"
+                        return f"<div style='background-color: {bg}; padding: 0 18px; border-radius: 8px; border: 1px solid {border}; display: flex; flex-direction: column; justify-content: center; height: 88px; box-sizing: border-box; margin-bottom: {margin_btm}; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'><div style='font-size: 11px; color: {text}; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; opacity: 0.8; letter-spacing: 0.5px;'>{label}</div><div style='display: flex; justify-content: space-between; align-items: center;'><div><span style='font-size: 24px; color: {text}; font-weight: 800; line-height: 1;'>{value}</span> <span style='font-size: 13px; font-weight: 600;'>{unit}</span></div></div></div>"
+                        
+                    # T.T Variance Evaluation
+                    is_tt_error = tt_gap > 2.0
+                    tt_label = "T.T GAP (Speed Variance)" if is_tt_error else "T.T GAP"
+                    tt_val = f"+{tt_gap:.1f}" if tt_gap > 0 else f"{tt_gap:.1f}"
+                        
+                    # Output Variance Evaluation
+                    is_out_error = output_gap < -(ie_target_upd * 0.05)
+                    out_label = "Out GAP (Below Target)" if is_out_error else "Out GAP"
+                    out_val = f"+{output_gap:,.0f}" if output_gap > 0 else f"{output_gap:,.0f}"
+                    
+                    # Outer container locked to exactly 190px (88 + 14 + 88 = 190)
+                    html_col3 = f"<div style='display: flex; flex-direction: column; height: 190px; box-sizing: border-box;'>{alert_box(tt_label, tt_val, 's', is_tt_error)}{alert_box(out_label, out_val, 'ea', is_out_error, is_last=True)}</div>"
+                    
+                    st.markdown(html_col3, unsafe_allow_html=True)
+
+                st.write("")
+                
+                # Draw OEE Comparison Chart
+                fig_oee = go.Figure()
+                fig_oee.add_trace(go.Bar(
+                    x=op_station_df['日期'], y=op_station_df['OEE'] * 100, 
+                    name='OSAT Reported OEE%', marker_color='#CBD5E1', opacity=0.8
+                ))
+                fig_oee.add_trace(go.Bar(
+                    x=op_station_df['日期'], y=op_station_df['True_OEE'] * 100, 
+                    name='True OEE% (Based on Target)', marker_color='#0369A1'
+                ))
+                fig_oee.update_layout(
+                    title=f"Efficiency Cross-Validation for {selected_osat_op} (Gap represents performance variance)",
+                    barmode='group',
+                    yaxis_title="OEE Percentage (%)",
+                    xaxis_title="Date",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                st.plotly_chart(fig_oee, use_container_width=True)
+
+            # --- 🔴 Module B: Tester Health & Waste Analysis ---
+            with osat_tabs[1]:
+                st.markdown("### 🏥 Tester Time State Breakdown")
+                st.caption("Excludes ghost testers. Analyzes purely where physical time is spent.")
+                
+                available_dates = df_machine['日期'].unique().tolist()
+                col_d, _ = st.columns([1, 3])
+                with col_d:
+                    selected_date = st.selectbox("Select Date for Health Check:", available_dates)
+                
+                daily_machine_df = df_machine[df_machine['日期'] == selected_date].copy()
+                
+                if daily_machine_df.empty:
+                    st.warning("No tester data available for this date.")
+                else:
+                    state_cols = ['Run', 'Rework', 'SetUp', 'Down', 'Idle', 'PM', 'Other']
+                    colors = ['#22C55E', '#F59E0B', '#FCD34D', '#EF4444', '#94A3B8', '#8B5CF6', '#E2E8F0']
+                    
+                    fig_health = go.Figure()
+                    for col, color in zip(state_cols, colors):
+                        if col in daily_machine_df.columns:
+                            fig_health.add_trace(go.Bar(
+                                x=daily_machine_df['機台代號'], y=daily_machine_df[col] * 100, 
+                                name=col, marker_color=color
+                            ))
+                            
+                    fig_health.update_layout(
+                        barmode='stack',
+                        title=f"Tester Health Distribution on {selected_date}",
+                        yaxis_title="Time Allocation (%)",
+                        xaxis_title="",
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    )
+                    st.plotly_chart(fig_health, use_container_width=True)
+
+                    st.markdown("#### ⚠️ Top Yield Killers (Highest Rework%)")
+                    top_rework = daily_machine_df[['機台代號', '正測顆數', 'Rework', 'Down', 'Idle']].sort_values(by='Rework', ascending=False).head(5)
+                    top_rework['Rework'] = top_rework['Rework'].apply(lambda x: f"{x*100:.1f}%")
+                    top_rework['Down'] = top_rework['Down'].apply(lambda x: f"{x*100:.1f}%")
+                    top_rework['Idle'] = top_rework['Idle'].apply(lambda x: f"{x*100:.1f}%")
+                    
+                    # Ensure column headers are in English for the UI display
+                    top_rework_display = top_rework.rename(columns={'機台代號': 'Tester ID', '正測顆數': 'Test Qty'})
+                    st.dataframe(top_rework_display, use_container_width=True, hide_index=True)
+
+            # --- 🟣 Module C: Cross-Validation & RCA System ---
+            with osat_tabs[2]:
+                st.markdown("### 🕵️ Reverse Engineering (RCA Dashboard)")
+                st.caption("Combine Station Output with Tester Status to find hidden anomalies.")
+                st.info("💡 **Feature Blueprint:** This module will eventually feature an interactive scatter plot allowing you to click an outlier tester and instantly see if it was secretly assigned to a high-yield or slow-running OpNo, breaking down the 'Mixed Operation' illusion.")
+                
+                st.write(f"Cleaned Station Data (`df_station_summary`) for {selected_osat_op}")
+                
+                # Ensure column headers are in English for the UI display
+                rca_display_df = op_station_df[['日期', '站點', '開機數', '正測顆數', 'OEE', 'True_OEE', 'Expected_Output']].rename(
+                    columns={
+                        '日期': 'Date', 
+                        '站點': 'Operation', 
+                        '開機數': 'Active Testers', 
+                        '正測顆數': 'Actual Output Qty'
+                    }
+                )
+                st.dataframe(rca_display_df, hide_index=True)
+
+
+# ==============================================================================
+# --- 📊 返回 Tab 1 剩餘執行區段 (含 st.stop 防呆) ---
+# ==============================================================================
+with main_tabs[0]:
     # ⚠️ 這裡完整保留您的 st.stop()
     if not selected_ops or not selected_progs or not selected_prods:
         st.info("👆 Please select **OpNo, ProgramName, and ProductNo** above to generate the report.")
