@@ -1044,7 +1044,7 @@ with main_tabs[2]:
         # 濾除沒有任何站點的空分類 (避免選單出現空殼)
         active_categories = {k: v for k, v in category_mapping.items() if len(v) > 0}
         
-        st.markdown("#### 🔍 Equipment & Station Filter")st.markdown("#### 🔍 Equipment & Station Filter")
+        st.markdown("#### 🔍 Equipment & Station Filter")
         
         # 🎨 UI 美化：四等分「指揮中心」排版 (Command Center Layout)
         # 比例微調：分類名字較長佔 1.6，站點 1.4，後面兩個數字輸入框各佔 1.2
