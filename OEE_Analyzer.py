@@ -328,6 +328,8 @@ def load_osat_data(file_bytes):
                     }
         return processed_data
     except Exception as e:
+        # 🚨 關鍵修改：不要吞掉錯誤，直接把真實的系統報錯印在 Dashboard 上！
+        st.error(f"🛑 Error Parsing Excel File: {str(e)}")
         return None
 
 # ==============================================================================
@@ -773,7 +775,7 @@ with main_tabs[1]:
             st.write(html_out, unsafe_allow_html=True)
 
 # ==============================================================================
-# --- 📊 Tab 1 執行區段 (含共用 Calculator 變數宣告) ---
+# --- 📊 Tab 1: OEE Analyzer ---
 # ==============================================================================
 with main_tabs[0]:
     # ==============================================================================
@@ -951,11 +953,11 @@ with main_tabs[0]:
 
     st.divider()
 
-    # -------------------------------------------------------------------------
-    # --- 🧮 共用變數宣告區：Capacity Calculator
-    #     這段變數不僅供應給本 Tab 的 IE OEE，也將餵給 Tab 3 的 OSAT 照妖鏡
-    # -------------------------------------------------------------------------
-    st.sidebar.header("🧮 Target Capacity Calculator")
+    # ==============================================================================
+    # --- 2. Sidebar Settings (Calculator & Targets) ---
+    # ==============================================================================
+
+    st.sidebar.header("🧮 Capacity Calculator")
     with st.sidebar.expander("Detailed Parameters", expanded=False):
         calc_lot_size = st.number_input("Lot Size", value=6600, step=100)
         calc_site = st.selectbox("Site", options=[1, 2, 4, 8, 16, 32, 64, 128, 256], index=3)
