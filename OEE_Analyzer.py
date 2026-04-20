@@ -1086,13 +1086,13 @@ with main_tabs[2]:
                 with col_uph:
                     st.markdown("<div style='padding-top: 36px; font-size: 13px; color: #64748b;'>🔗 Linked to Global Calc</div>", unsafe_allow_html=True)
                 with col_oee:
-                    st.markdown(f"<div style='padding-top: 36px; font-size: 13px; color: #0369a1; font-weight: 700;'>T.T: {calc_test_time}s | Site: {calc_site}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='padding-top: 36px; font-size: 13px; color: #0369a1; font-weight: 700;'>TT: {calc_test_time}s | Site: {calc_site}</div>", unsafe_allow_html=True)
                     
                 ie_max_upd = (86400 / calc_test_time) * int(calc_site) if calc_test_time > 0 else 0
                 ie_target_upd = single_cap
                 ie_oee = calc_oee
                 
-                speed_label = "T.T"
+                speed_label = "TT"
                 speed_unit = "s"
                 ie_speed_val = calc_test_time
                 
@@ -1135,9 +1135,9 @@ with main_tabs[2]:
             # --- 動態差異分析邏輯 (Dynamic Variance Logic) ---
             if is_ate_track:
                 osat_speed_val = (86400 / osat_implied_max) * int(calc_site) if osat_implied_max > 0 else 0
-                speed_gap = osat_speed_val - ie_speed_val # 對 T.T 來說，正數代表變慢(壞事)
+                speed_gap = osat_speed_val - ie_speed_val # 對 TT 來說，正數代表變慢(壞事)
                 is_speed_error = speed_gap > 2.0
-                speed_gap_label = "T.T GAP (Speed Variance)" if is_speed_error else "T.T GAP"
+                speed_gap_label = "TT GAP (Speed Variance)" if is_speed_error else "TT GAP"
             else:
                 osat_speed_val = osat_implied_max / 24 # 反推 UPH
                 speed_gap = osat_speed_val - ie_speed_val # 對 UPH 來說，負數代表變慢(壞事)
