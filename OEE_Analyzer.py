@@ -297,7 +297,10 @@ def clean_percentage(val):
 @st.cache_data
 def load_osat_data(file_bytes):
     try:
-        xls = pd.ExcelFile(file_bytes)
+        # 💡 關鍵修復：將純 bytes 包裝成 pandas 喜歡的 file-like object
+        file_obj = io.BytesIO(file_bytes) 
+        xls = pd.ExcelFile(file_obj)
+        
         sheet_names = xls.sheet_names
         processed_data = {}
         
@@ -328,7 +331,7 @@ def load_osat_data(file_bytes):
                     }
         return processed_data
     except Exception as e:
-        # 🚨 關鍵修改：不要吞掉錯誤，直接把真實的系統報錯印在 Dashboard 上！
+        # 🚨 保留這個錯誤捕捉機制，它太好用了！
         st.error(f"🛑 Error Parsing Excel File: {str(e)}")
         return None
 
