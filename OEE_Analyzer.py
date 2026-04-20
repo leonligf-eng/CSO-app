@@ -1080,10 +1080,14 @@ with main_tabs[2]:
             # --- 🟢 Module A: Performance Alignment ---
             with osat_tabs[0]:
                 st.markdown("### ⚖️ OEE Alignment: Internal Target vs. OSAT Reported")
-                
-                # Core True OEE Calculation
+                    
+                # 先算出內部標準的最大理論值 (Theoretical MAX)
+                ie_max_upd = (86400 / calc_test_time) * int(calc_site) if calc_test_time > 0 else 0
+
                 op_station_df['Expected_Output'] = op_station_df['開機數'] * single_cap
-                op_station_df['True_OEE'] = np.where(op_station_df['Expected_Output'] > 0, op_station_df['正測顆數'] / op_station_df['Expected_Output'], 0)
+                # 🌟 修正：Core True OEE Calculation (分母必須是 MAX，而不是 Target)
+                op_station_df['Max_Possible_Output'] = op_station_df['開機數'] * ie_max_upd
+                op_station_df['True_OEE'] = np.where(op_station_df['Max_Possible_Output'] > 0, op_station_df['正測顆數'] / op_station_df['Max_Possible_Output'], 0)
                 
                 # --- 🎯 Implied Baseline Engine (4-Dimension Breakdown) ---
                 total_qty = op_station_df['正測顆數'].sum()
@@ -1091,7 +1095,6 @@ with main_tabs[2]:
                 total_machine_days = (op_station_df['開機數'] * op_station_df['OEE']).sum()
                 
                 # [1. Internal IE Standard]
-                ie_max_upd = (86400 / calc_test_time) * int(calc_site) if calc_test_time > 0 else 0
                 ie_oee = calc_oee
                 ie_target_upd = single_cap 
                 
