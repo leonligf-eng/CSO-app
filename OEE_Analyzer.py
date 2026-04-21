@@ -1361,12 +1361,18 @@ with main_tabs[2]:
                         avg_run, avg_proc, avg_down, avg_idle = 0, 0, 0, 0
                     
                     c_pie, c_bar = st.columns([1, 2])
+                    # ==========================================
+                    # 1. 圓餅圖 (Donut Chart) - 強制小數點 2 位
+                    # ==========================================
                     with c_pie:
                         fig_donut = go.Figure(data=[go.Pie(
                             labels=['Run', 'Setup', 'Down', 'Idle'],
                             values=[avg_run, avg_proc, avg_down, avg_idle],
                             hole=.4,
-                            marker_colors=['#5CB85C', '#F0AD4E', '#D9534F', '#95A5A6']
+                            marker_colors=['#5CB85C', '#F0AD4E', '#D9534F', '#95A5A6'],
+                            textinfo='label+percent',
+                            # 🌟 強制 Hover 視窗只顯示 名稱 與 百分比 (小數點 2 位)，隱藏冗長的原始數值
+                            hovertemplate='<b>%{label}</b><br>%{percent:.2f}<extra></extra>' 
                         )])
                         fig_donut.update_layout(
                             title_text="Overall Waste Distribution",
@@ -1376,21 +1382,41 @@ with main_tabs[2]:
                         )
                         st.plotly_chart(fig_donut, use_container_width=True)
                     
+                    # ==========================================
+                    # 2. 堆疊趨勢圖 (Daily Trend) - 強制小數點 2 位
+                    # ==========================================
                     with c_bar:
                         fig_trend = go.Figure()
-                        fig_trend.add_trace(go.Bar(x=trend_df['日期'], y=trend_df['Run_Cat']*100, name='Run', marker_color='#5CB85C'))
-                        fig_trend.add_trace(go.Bar(x=trend_df['日期'], y=trend_df['Process_Cat']*100, name='Setup', marker_color='#F0AD4E'))
-                        fig_trend.add_trace(go.Bar(x=trend_df['日期'], y=trend_df['Down_Cat']*100, name='Down', marker_color='#D9534F'))
-                        fig_trend.add_trace(go.Bar(x=trend_df['日期'], y=trend_df['Idle_Cat']*100, name='Idle', marker_color='#95A5A6'))
+                        
+                        # 🌟 利用 hovertemplate 強制規定彈出視窗的格式為 "名稱: 數值%"
+                        fig_trend.add_trace(go.Bar(
+                            x=trend_df['日期'], y=trend_df['Run_Cat']*100, 
+                            name='Run', marker_color='#5CB85C',
+                            hovertemplate='%{y:.2f}%<extra></extra>'
+                        ))
+                        fig_trend.add_trace(go.Bar(
+                            x=trend_df['日期'], y=trend_df['Process_Cat']*100, 
+                            name='Setup', marker_color='#F0AD4E',
+                            hovertemplate='%{y:.2f}%<extra></extra>'
+                        ))
+                        fig_trend.add_trace(go.Bar(
+                            x=trend_df['日期'], y=trend_df['Down_Cat']*100, 
+                            name='Down', marker_color='#D9534F',
+                            hovertemplate='%{y:.2f}%<extra></extra>'
+                        ))
+                        fig_trend.add_trace(go.Bar(
+                            x=trend_df['日期'], y=trend_df['Idle_Cat']*100, 
+                            name='Idle', marker_color='#95A5A6',
+                            hovertemplate='%{y:.2f}%<extra></extra>'
+                        ))
                         
                         fig_trend.update_layout(
                             title="Daily Waste Trend (100% Normalized Production Time)",
                             barmode='stack',
                             yaxis_title="Percentage (%)",
-                            yaxis=dict(range=[0, 100]), # 🌟 強制 Y 軸封頂在 100%
+                            yaxis=dict(range=[0, 100]), 
                             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                            hovermode="x unified",
-                            hoverlabel=dict(namelength=-1)
+                            hovermode="x unified"
                         )
                         st.plotly_chart(fig_trend, use_container_width=True)
                     
