@@ -1489,18 +1489,28 @@ with main_tabs[2]:
                 render_rca_drilldown(rca_machine_df)
                 
                 st.markdown("---")
-                col_kw1, col_kw2 = st.columns(2)
-                with col_kw1:
-                    st.markdown("#### ⚠️ Top Yield Killers (Highest Rework & Down)")
-                    top_rework = rca_machine_df[['機台代號', '正測顆數', 'Rework', 'Down', 'Idle']].sort_values(by=['Down', 'Rework'], ascending=[False, False]).head(5)
-                    top_rework['Rework'] = top_rework['Rework'].apply(lambda x: f"{x*100:.1f}%")
-                    top_rework['Down'] = top_rework['Down'].apply(lambda x: f"{x*100:.1f}%")
-                    top_rework['Idle'] = top_rework['Idle'].apply(lambda x: f"{x*100:.1f}%")
-                    top_rework_display = top_rework.rename(columns={'機台代號': 'Tester ID', '正測顆數': 'Test Qty'})
-                    st.dataframe(top_rework_display, use_container_width=True, hide_index=True)
                 
-                # 🌟🌟🌟 新版: 自動抓鬼高亮 (Conditional Formatting) 的 Raw Data 表格 🌟🌟🌟
-                with col_kw2:
+                # ==========================================
+                # === 上半部：Top Yield Killers (滿版警報區) ===
+                # ==========================================
+                st.markdown("#### ⚠️ Top Yield Killers (Highest Rework & Down)")
+                st.caption("Quickly identify top offenders with Down > 10% or high Rework rates.")
+                
+                top_rework = rca_machine_df[['機台代號', '正測顆數', 'Rework', 'Down', 'Idle']].sort_values(by=['Down', 'Rework'], ascending=[False, False]).head(5)
+                top_rework['Rework'] = top_rework['Rework'].apply(lambda x: f"{x*100:.1f}%")
+                top_rework['Down'] = top_rework['Down'].apply(lambda x: f"{x*100:.1f}%")
+                top_rework['Idle'] = top_rework['Idle'].apply(lambda x: f"{x*100:.1f}%")
+                top_rework_display = top_rework.rename(columns={'機台代號': 'Tester ID', '正測顆數': 'Test Qty'})
+                
+                # 滿版顯示前 5 名戰犯
+                st.dataframe(top_rework_display, use_container_width=True, hide_index=True)
+                
+                st.write("") # 增加適當留白
+                
+                # ==========================================
+                # === 下半部：Machine Level Raw Data (折疊稽核區) ===
+                # ==========================================
+                with st.expander("📋 Click to view Full Machine Level Raw Data (Evidence)", expanded=False):
                     st.markdown("#### 📋 Machine Level Raw Data (Evidence)")
                     st.caption("Screenshot this raw data for OSAT auditing. (Auto-sorted by culprits)")
                     
@@ -1539,6 +1549,7 @@ with main_tabs[2]:
                         styled_raw_df = styled_raw_df.applymap(highlight_red, subset=['Down', 'Rework']) \
                                                      .applymap(highlight_orange, subset=['Idle'])
                     
+                    # 滿版顯示加上高亮特效的原始表
                     st.dataframe(styled_raw_df, use_container_width=True, hide_index=True)
 
 # ==============================================================================
