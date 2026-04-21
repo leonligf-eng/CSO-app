@@ -1498,10 +1498,48 @@ with main_tabs[2]:
                     top_rework['Idle'] = top_rework['Idle'].apply(lambda x: f"{x*100:.1f}%")
                     top_rework_display = top_rework.rename(columns={'機台代號': 'Tester ID', '正測顆數': 'Test Qty'})
                     st.dataframe(top_rework_display, use_container_width=True, hide_index=True)
+                
+                # 🌟🌟🌟 新版: 自動抓鬼高亮 (Conditional Formatting) 的 Raw Data 表格 🌟🌟🌟
                 with col_kw2:
                     st.markdown("#### 📋 Machine Level Raw Data (Evidence)")
-                    st.caption("Screenshot this raw data for OSAT auditing.")
-                    st.dataframe(rca_machine_df, use_container_width=True, hide_index=True)
+                    st.caption("Screenshot this raw data for OSAT auditing. (Auto-sorted by culprits)")
+                    
+                    # 1. 自動排序：把當天 Down 和 Rework 最高的機台排在前面
+                    rca_machine_df = rca_machine_df.sort_values(by=['Down', 'Rework'], ascending=[False, False])
+                    
+                    # 2. 自動抓鬼高亮與格式化 (Pandas Styler)
+                    pct_cols_list = [
+                        'E%', 'E_DO1%', 'DutOff%', '重工效率', '總產出效率', 
+                        'Run', 'Rework', 'SetUp', 'Down', 'Idle', 'PM', 'Other', 'OEE',
+                        'Clean', 'Corr', 'EQC', 'E1', 'E2'
+                    ]
+                    valid_pct_cols = [c for c in rca_machine_df.columns if c in pct_cols_list]
+                    
+                    # 定義小數點兩位的格式
+                    format_dict = {col: "{:.2%}" for col in valid_pct_cols}
+                    
+                    # 定義高亮邏輯函數
+                    def highlight_red(val):
+                        if isinstance(val, (int, float)) and val > 0.05:
+                            return 'background-color: #fee2e2; color: #991b1b; font-weight: bold;'
+                        return ''
+                        
+                    def highlight_orange(val):
+                        if isinstance(val, (int, float)) and val > 0.10:
+                            return 'background-color: #ffedd5; color: #9a3412; font-weight: bold;'
+                        return ''
+                    
+                    styled_raw_df = rca_machine_df.style.format(format_dict)
+                    
+                    # 相容較新與舊版 Pandas API 的寫法
+                    if hasattr(styled_raw_df, "map"):
+                        styled_raw_df = styled_raw_df.map(highlight_red, subset=['Down', 'Rework']) \
+                                                     .map(highlight_orange, subset=['Idle'])
+                    else:
+                        styled_raw_df = styled_raw_df.applymap(highlight_red, subset=['Down', 'Rework']) \
+                                                     .applymap(highlight_orange, subset=['Idle'])
+                    
+                    st.dataframe(styled_raw_df, use_container_width=True, hide_index=True)
 
 # ==============================================================================
 # --- 📊 返回 Tab 1 剩餘執行區段 (含 st.stop 防呆) ---
