@@ -336,6 +336,115 @@ def load_osat_data(file_bytes):
         return None
 
 # ==============================================================================
+# --- 🌟 NEW: 單機 24 小時時間還原推疊圖 (SEMI E10 架構) ---
+# ==============================================================================
+def render_rca_drilldown(df_machine):
+    """
+    繪製單機 24 小時時間還原推疊圖 (SEMI E10 架構)
+    df_machine: 傳入包含當天該站點所有機台明細的 DataFrame
+    """
+    st.markdown("#### 🔬 Tester 24-Hour Time Allocation (Machine Drill-down)")
+    
+    # 建立一個乾淨的 DataFrame 來做計算，避免污染原始資料
+    df_calc = df_machine.copy()
+    
+    # 1. 確保數值格式正確 (處理百分比字串轉換為小數)
+    def clean_pct(val):
+        if pd.isna(val): return 0.0
+        if isinstance(val, str): 
+            return float(val.replace('%', '').strip()) / 100.0
+        return float(val)
+
+    cols_to_clean = ['Run', 'SetUp', 'Down', 'Idle', 'Other', 'Rework', 'Clean', 'Corr', 'PM', 'E1', 'E2']
+    for col in cols_to_clean:
+        if col in df_calc.columns:
+            df_calc[col] = df_calc[col].apply(clean_pct)
+        else:
+            df_calc[col] = 0.0 # 若無此欄位則補零
+
+    df_calc['生產時間'] = df_calc['生產時間'].astype(float)
+    
+    # ==========================================
+    # 🌟 核心演算法：俄羅斯娃娃 24 小時模型還原
+    # ==========================================
+    # 第一層：生產時間 (小時)
+    df_calc['Prod_Hrs'] = df_calc['生產時間'] / 60.0
+    
+    # 第二層：未安排生產時間 (Unscheduled Time)
+    df_calc['Unscheduled_Hrs'] = 24.0 - df_calc['Prod_Hrs']
+    df_calc['Unscheduled_Hrs'] = df_calc['Unscheduled_Hrs'].apply(lambda x: max(0, x)) # 防呆，避免負數
+    
+    # 第三層：閒置時間 (Idle)
+    df_calc['Idle_Hrs'] = df_calc['Prod_Hrs'] * df_calc['Idle']
+    
+    # 第四層：真實運作時間 (Active Time)
+    df_calc['Active_Hrs'] = df_calc['Prod_Hrs'] - df_calc['Idle_Hrs']
+    
+    # 展開變因 (乘上真實運作時間)
+    df_calc['Run_Hrs'] = df_calc['Active_Hrs'] * df_calc['Run']
+    df_calc['Setup_Hrs'] = df_calc['Active_Hrs'] * df_calc['SetUp']
+    df_calc['Down_Hrs'] = df_calc['Active_Hrs'] * df_calc['Down']
+    
+    # 其他所有運作狀態加總 (Other, PM, Rework 等)
+    df_calc['Other_Active_Hrs'] = df_calc['Active_Hrs'] - (df_calc['Run_Hrs'] + df_calc['Setup_Hrs'] + df_calc['Down_Hrs'])
+    df_calc['Other_Active_Hrs'] = df_calc['Other_Active_Hrs'].apply(lambda x: max(0, x))
+
+    # ==========================================
+    # 📊 繪製 Plotly 24 小時推疊圖
+    # ==========================================
+    fig = go.Figure()
+
+    # 按照 SEMI E10 邏輯，從底層 (最有價值的 Run) 往上疊加到 (未排產的 Unscheduled)
+    
+    # 🟢 1. Value Adding (Run)
+    fig.add_trace(go.Bar(
+        name='Value Adding (Run)', x=df_calc['機台代號'], y=df_calc['Run_Hrs'], 
+        marker_color='#5CB85C', hoverinfo='x+name+y', text=df_calc['Run_Hrs'].round(1)
+    ))
+    # 🟡 2. Process Loss (Setup)
+    fig.add_trace(go.Bar(
+        name='Process Loss (Setup)', x=df_calc['機台代號'], y=df_calc['Setup_Hrs'], 
+        marker_color='#F0AD4E', hoverinfo='x+name+y'
+    ))
+    # 🔴 3. Equipment Loss (Down)
+    fig.add_trace(go.Bar(
+        name='Equipment Loss (Down)', x=df_calc['機台代號'], y=df_calc['Down_Hrs'], 
+        marker_color='#D9534F', hoverinfo='x+name+y'
+    ))
+    # 🟣 4. Other Active (PM, Rework...)
+    fig.add_trace(go.Bar(
+        name='Other Active States', x=df_calc['機台代號'], y=df_calc['Other_Active_Hrs'], 
+        marker_color='#9B59B6', hoverinfo='x+name+y'
+    ))
+    # 🌫️ 5. Starvation (Idle)
+    fig.add_trace(go.Bar(
+        name='Starvation (Idle)', x=df_calc['機台代號'], y=df_calc['Idle_Hrs'], 
+        marker_color='#95A5A6', hoverinfo='x+name+y'
+    ))
+    # ⬜ 6. Unscheduled Time (未安排生產/黑洞)
+    fig.add_trace(go.Bar(
+        name='Unscheduled (No Target)', x=df_calc['機台代號'], y=df_calc['Unscheduled_Hrs'], 
+        marker_color='rgba(236, 240, 241, 0.5)',  # 半透明淺灰
+        marker_line_color='#BDC3C7', marker_line_width=1.5, hoverinfo='x+name+y'
+    ))
+
+    # 圖表排版設定
+    fig.update_layout(
+        barmode='stack',
+        title='SEMI E10 Standard: 24-Hour Tester Utilization',
+        yaxis=dict(title='Hours', range=[0, 24], dtick=2), # Y 軸強制定在 24 小時
+        xaxis=dict(title='Machine ID', tickangle=-45),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        plot_bgcolor='white',
+        hovermode="x unified"
+    )
+    
+    # 加上網格線方便對齊
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
+
+    st.plotly_chart(fig, use_container_width=True)
+
+# ==============================================================================
 # --- 🌟 核心防護網：檔案變更與全面狀態清理 (File Change Detector) ---
 # ==============================================================================
 st.sidebar.markdown("## 📂 OSAT Yield Report Inputs")
@@ -1258,125 +1367,63 @@ with main_tabs[2]:
                     st.dataframe(top_rework_display, use_container_width=True, hide_index=True)
 
             # --- 🟣 Module C: Cross-Validation & RCA System ---
-                with osat_tabs[2]:
-                    st.markdown("### 🕵️ Reverse Engineering (RCA Dashboard)")
-                    st.caption("Combine Station Output with Tester Status to find hidden anomalies.")
-                    
-                    # ==========================================
-                    # 1. 精美數據表：UPD 與 OEE 百分比呈現
-                    # ==========================================
-                    st.markdown("#### 📊 Daily Production & Gap Analysis")
-                    
-                    rca_display_df = op_station_df.copy()
-                    
-                    # 將 OEE 轉換為百分比數字 (例如 0.76 -> 76.0)
-                    rca_display_df['OEE_Pct'] = rca_display_df['OEE'] * 100
-                    rca_display_df['True_OEE_Pct'] = rca_display_df['True_OEE'] * 100
-                    
-                    # 計算 UPD_Gap (實際產出 - 目標產出)
-                    rca_display_df['UPD_Gap'] = rca_display_df['正測顆數'] - rca_display_df['Expected_Output']
-                    
-                    # 篩選並排列要顯示的欄位
-                    table_df = rca_display_df[['日期', '站點', '開機數', '正測顆數', 'Expected_Output', 'UPD_Gap', 'OEE_Pct', 'True_OEE_Pct']]
-                    
-                    # 使用 Streamlit 的 column_config 進行高質感渲染
-                    st.dataframe(
-                        table_df,
-                        hide_index=True,
-                        use_container_width=True,
-                        column_config={
-                            "日期": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
-                            "站點": st.column_config.TextColumn("Operation"),
-                            "開機數": st.column_config.NumberColumn("Active Testers", format="%.2f"),
-                            "正測顆數": st.column_config.NumberColumn("Actual UPD", format="%d ea"),
-                            "Expected_Output": st.column_config.NumberColumn("Target UPD", format="%d ea"),
-                            "UPD_Gap": st.column_config.NumberColumn("UPD Gap", format="%d ea"),
-                            "OEE_Pct": st.column_config.NumberColumn("OSAT OEE", format="%.2f %%"),
-                            "True_OEE_Pct": st.column_config.NumberColumn("True OEE", format="%.2f %%")
-                        }
-                    )
-                    
-                    st.markdown("---")
-                    
-                    # ==========================================
-                    # 2. 四大分類狀態圖表 (4-Category Breakdown)
-                    # ==========================================
-                    st.markdown("#### ⏱️ Tester Time Allocation (Root Cause Breakdown)")
-                    
-                    # 💡 將 12 個複雜的變因，歸納為工程師一看就懂的 4 大類
-                    status_categories = {
-                        'Value Adding (Run)': ['Run'],
-                        'Process Loss (Setup/Adjust)': ['SetUp', 'Clean', 'Corr', 'Rework', 'EQC'],
-                        'Equipment Loss (Down/PM)': ['Down', 'PM', 'E1', 'E2'],
-                        'Starvation (Idle/Wait)': ['Idle', 'Other']
+            with osat_tabs[2]:
+                st.markdown("### 🕵️ Reverse Engineering (RCA Dashboard)")
+                st.caption("Combine Station Output with Tester Status to find hidden anomalies.")
+                
+                # ==========================================
+                # 1. 精美數據表：UPD 與 OEE 百分比呈現
+                # ==========================================
+                st.markdown("#### 📊 Daily Production & Gap Analysis")
+                
+                rca_display_df = op_station_df.copy()
+                
+                # 將 OEE 轉換為百分比數字 (例如 0.76 -> 76.0)
+                rca_display_df['OEE_Pct'] = rca_display_df['OEE'] * 100
+                rca_display_df['True_OEE_Pct'] = rca_display_df['True_OEE'] * 100
+                
+                # 計算 UPD_Gap (實際產出 - 目標產出)
+                rca_display_df['UPD_Gap'] = rca_display_df['正測顆數'] - rca_display_df['Expected_Output']
+                
+                # 篩選並排列要顯示的欄位
+                table_df = rca_display_df[['日期', '站點', '開機數', '正測顆數', 'Expected_Output', 'UPD_Gap', 'OEE_Pct', 'True_OEE_Pct']]
+                
+                # 使用 Streamlit 的 column_config 進行高質感渲染
+                st.dataframe(
+                    table_df,
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "日期": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
+                        "站點": st.column_config.TextColumn("Operation"),
+                        "開機數": st.column_config.NumberColumn("Active Testers", format="%.2f"),
+                        "正測顆數": st.column_config.NumberColumn("Actual UPD", format="%d ea"),
+                        "Expected_Output": st.column_config.NumberColumn("Target UPD", format="%d ea"),
+                        "UPD_Gap": st.column_config.NumberColumn("UPD Gap", format="%d ea"),
+                        "OEE_Pct": st.column_config.NumberColumn("OSAT OEE", format="%.2f %%"),
+                        "True_OEE_Pct": st.column_config.NumberColumn("True OEE", format="%.2f %%")
                     }
+                )
+                
+                st.markdown("---")
+                
+                # ==========================================
+                # 🌟 2. SEMI E10 24-Hour Machine Drill-down
+                # ==========================================
+                available_rca_dates = df_machine['日期'].unique().tolist()
+                
+                if not available_rca_dates:
+                    st.warning("No machine detailed data available for RCA.")
+                else:
+                    col_rca_date, _ = st.columns([1, 3])
+                    with col_rca_date:
+                        selected_rca_date = st.selectbox("Select Date for RCA Drill-down:", available_rca_dates, key="rca_date_picker")
                     
-                    # 建立繪圖專用的 DataFrame
-                    chart_df = pd.DataFrame({'Date': rca_display_df['日期']})
+                    rca_machine_df = df_machine[df_machine['日期'] == selected_rca_date].copy()
                     
-                    def safe_pct_to_float(val):
-                        if pd.isna(val): return 0.0
-                        if isinstance(val, str):
-                            val = val.strip()
-                            if '%' in val:
-                                try: return float(val.replace('%', '')) / 100.0
-                                except: return 0.0
-                            else:
-                                try: return float(val)
-                                except: return 0.0
-                        return float(val)
-                    
-                    # 💡 定義哪些狀態是「依附在開機數下」的 (Active Time)
-                    # Idle 和 Other 通常是獨立於開機數之外的 (Non-Active Time)
-                    active_states = ['Run', 'SetUp', 'Clean', 'Corr', 'Rework', 'EQC', 'Down', 'PM', 'E1', 'E2']
+                    # 呼叫整合進來的函式，畫出強大的 24 小時堆疊圖！
+                    render_rca_drilldown(rca_machine_df)
 
-                    for cat_name, cols in status_categories.items():
-                        valid_cols = [c for c in cols if c in rca_display_df.columns]
-                        if valid_cols:
-                            temp_sum = pd.Series(0.0, index=rca_display_df.index)
-                            
-                            for c in valid_cols:
-                                # 1. 清洗數值
-                                raw_val = rca_display_df[c].apply(safe_pct_to_float)
-                                
-                                # 2. 🌟 核心修正：統一分母 (Normalization by Active Testers)
-                                # 如果這個狀態屬於「運作狀態」，就必須乘以「開機數」來還原成 24 小時的真實佔比
-                                if c in active_states and '開機數' in rca_display_df.columns:
-                                    # 避免開機數大於 1 時造成比例膨脹，這裡取 min(1, 開機數) 作為防護
-                                    load_factor = rca_display_df['開機數'].apply(lambda x: min(1.0, float(x)) if pd.notna(x) else 1.0)
-                                    real_val = raw_val * load_factor
-                                else:
-                                    # 如果是 Idle/Wait，直接使用原始數值
-                                    real_val = raw_val
-                                    
-                                temp_sum += real_val
-                                
-                            chart_df[cat_name] = temp_sum * 100
-                        else:
-                            chart_df[cat_name] = 0.0
-                            
-                    chart_df.set_index('Date', inplace=True)
-                    
-                    # 繪製圖表 (優先使用 Plotly 來支援自訂語意顏色，若無安裝則退回原生圖表)
-                    try:
-                        import plotly.express as px
-                        fig = px.bar(
-                            chart_df.reset_index(),
-                            x='Date',
-                            y=list(status_categories.keys()),
-                            color_discrete_map={
-                                'Value Adding (Run)': '#22c55e',       # 🟢 綠色：正常生產
-                                'Process Loss (Setup/Adjust)': '#eab308', # 🟡 黃色：調機/重工
-                                'Equipment Loss (Down/PM)': '#ef4444',    # 🔴 紅色：當機/保養
-                                'Starvation (Idle/Wait)': '#94a3b8'       # ⚪ 灰色：閒置/沒貨
-                            },
-                            labels={'value': 'Percentage (%)', 'variable': 'Category'}
-                        )
-                        fig.update_layout(barmode='stack', yaxis_title="Time Ratio (%)", legend_title_text="Status Category")
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                    except ImportError:
-                        st.bar_chart(chart_df)
 
 # ==============================================================================
 # --- 📊 返回 Tab 1 剩餘執行區段 (含 st.stop 防呆) ---
