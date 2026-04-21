@@ -1314,21 +1314,28 @@ with main_tabs[2]:
                     # 建立繪圖專用的 DataFrame
                     chart_df = pd.DataFrame({'Date': rca_display_df['日期']})
                     
+                    # 🛡️ 建立無差別萬用型別轉換器 (專治 Mock Data 與異常字串)
+                    def safe_pct_to_float(val):
+                        if pd.isna(val): return 0.0
+                        if isinstance(val, str):
+                            val = val.strip()
+                            if '%' in val:
+                                try: return float(val.replace('%', '')) / 100.0
+                                except: return 0.0
+                            else:
+                                try: return float(val)
+                                except: return 0.0
+                        return float(val)
+                    
                     for cat_name, cols in status_categories.items():
                         # 安全機制：只取報表裡真正有的欄位
                         valid_cols = [c for c in cols if c in rca_display_df.columns]
                         if valid_cols:
-                            # 🛡️ 關鍵修復：上場前強制安檢！把殘留 '%' 符號的純文字強制轉為數值
+                            # 🛡️ 上場前強制安檢：套用萬用轉換器，把所有東西洗成乾淨的 float
                             for c in valid_cols:
-                                if rca_display_df[c].dtype == 'object':
-                                    # 拔掉 % 並除以 100 轉為正確的浮點數，遇到空值補 0
-                                    rca_display_df[c] = pd.to_numeric(
-                                        rca_display_df[c].astype(str).str.replace('%', '', regex=False), 
-                                        errors='coerce'
-                                    ) / 100.0
-                                    rca_display_df[c] = rca_display_df[c].fillna(0)
-                                    
-                            # 將小數轉換為百分比 (例如 0.84 -> 84%) 並加總
+                                rca_display_df[c] = rca_display_df[c].apply(safe_pct_to_float)
+                                
+                            # 將小數轉換為百分比 (例如 0.84 -> 84.0) 並加總
                             chart_df[cat_name] = rca_display_df[valid_cols].sum(axis=1) * 100
                         else:
                             chart_df[cat_name] = 0.0
