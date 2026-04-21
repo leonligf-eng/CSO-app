@@ -398,41 +398,39 @@ def render_rca_drilldown(df_machine):
         df_calc[col] = df_calc[col].round(1)
 
     # ==========================================
-    # 📊 繪製 Plotly 1440 分鐘推疊圖
+    # 📊 繪製 Plotly 1440 分鐘推疊圖 (極簡命名版)
     # ==========================================
     fig = go.Figure()
 
-    # 按照 SEMI E10 邏輯，從底層 (最有價值的 Run) 往上疊加到 (未排產的 Unscheduled)
-    
     # 🟢 1. Value Adding (Run)
     fig.add_trace(go.Bar(
-        name='Value Adding (Run)', x=df_calc['機台代號'], y=df_calc['Run_Mins'], 
+        name='Run', x=df_calc['機台代號'], y=df_calc['Run_Mins'], 
         marker_color='#5CB85C', text=df_calc['Run_Mins'].round(0), hoverinfo='x+name+y'
     ))
     # 🟡 2. Process Loss (Setup)
     fig.add_trace(go.Bar(
-        name='Process Loss (Setup)', x=df_calc['機台代號'], y=df_calc['Setup_Mins'], 
+        name='Setup', x=df_calc['機台代號'], y=df_calc['Setup_Mins'], 
         marker_color='#F0AD4E', hoverinfo='x+name+y'
     ))
     # 🔴 3. Equipment Loss (Down)
     fig.add_trace(go.Bar(
-        name='Equipment Loss (Down)', x=df_calc['機台代號'], y=df_calc['Down_Mins'], 
+        name='Down', x=df_calc['機台代號'], y=df_calc['Down_Mins'], 
         marker_color='#D9534F', hoverinfo='x+name+y'
     ))
     # 🟣 4. Other Active (PM, Rework...)
     fig.add_trace(go.Bar(
-        name='Other Active States', x=df_calc['機台代號'], y=df_calc['Other_Active_Mins'], 
+        name='Other', x=df_calc['機台代號'], y=df_calc['Other_Active_Mins'], 
         marker_color='#9B59B6', hoverinfo='x+name+y'
     ))
     # 🌫️ 5. Starvation (Idle)
     fig.add_trace(go.Bar(
-        name='Starvation (Idle)', x=df_calc['機台代號'], y=df_calc['Idle_Mins'], 
+        name='Idle', x=df_calc['機台代號'], y=df_calc['Idle_Mins'], 
         marker_color='#95A5A6', hoverinfo='x+name+y'
     ))
     # ⬜ 6. Unscheduled Time (未安排生產/黑洞)
     fig.add_trace(go.Bar(
-        name='Unscheduled (No Target)', x=df_calc['機台代號'], y=df_calc['Unscheduled_Mins'], 
-        marker_color='rgba(236, 240, 241, 0.5)',  # 半透明淺灰
+        name='Unscheduled', x=df_calc['機台代號'], y=df_calc['Unscheduled_Mins'], 
+        marker_color='rgba(236, 240, 241, 0.5)',  
         marker_line_color='#BDC3C7', marker_line_width=1.5, hoverinfo='x+name+y'
     ))
 
@@ -443,12 +441,14 @@ def render_rca_drilldown(df_machine):
         yaxis=dict(
             title='Minutes (mins)', 
             range=[0, 1440], 
-            dtick=120  # 每 120 分鐘 (2 小時) 畫一條橫向網格線，方便工程師快速估算
+            dtick=120 
         ), 
         xaxis=dict(title='Machine ID', tickangle=-45),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         plot_bgcolor='white',
-        hovermode="x unified"
+        hovermode="x unified",
+        # 🌟 加上這行保險設定，確保即使未來字變長，也不會被隨意截斷 (namelength=-1)
+        hoverlabel=dict(namelength=-1) 
     )
     
     # 加上網格線方便對齊
