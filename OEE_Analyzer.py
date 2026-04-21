@@ -312,7 +312,13 @@ def load_osat_data(file_bytes):
                     df_station['日期'] = pd.to_datetime(df_station['日期']).dt.date
                     df_station = df_station.rename(columns={'OEE%': 'OEE'})
                     
-                    pct_cols = ['E%', 'E_DO1%', 'DutOff%', '重工效率', '總產出效率', 'Run', 'Rework', 'SetUp', 'Down', 'Idle', 'PM', 'Other', 'OEE']
+                    # 🌟 BUG FIX: 補齊所有可能的狀態欄位，確保 Clean/Corr/E1 等字串被正確轉換為浮點數
+                    pct_cols = [
+                        'E%', 'E_DO1%', 'DutOff%', '重工效率', '總產出效率', 
+                        'Run', 'Rework', 'SetUp', 'Down', 'Idle', 'PM', 'Other', 'OEE',
+                        'Clean', 'Corr', 'EQC', 'E1', 'E2'
+                    ]
+                    
                     for col in pct_cols:
                         if col in df_station.columns: df_station[col] = df_station[col].apply(clean_percentage)
                             
@@ -456,10 +462,13 @@ def render_rca_drilldown(df_machine):
 
     st.plotly_chart(fig, use_container_width=True)
 
-# 輔助安全加總函數 (給 Tab 2 使用)
+# 🌟 BUG FIX: 強化安全加總函數 (給 Tab 2 使用)
 def safe_sum_cols(df, cols):
     valid_cols = [c for c in cols if c in df.columns]
-    return df[valid_cols].sum(axis=1) if valid_cols else pd.Series(0, index=df.index)
+    if valid_cols:
+        # 強制轉換為數值型態，避免字串與數字混合加總導致 TypeError
+        return df[valid_cols].apply(pd.to_numeric, errors='coerce').fillna(0).sum(axis=1)
+    return pd.Series(0, index=df.index)
 
 
 # ==============================================================================
