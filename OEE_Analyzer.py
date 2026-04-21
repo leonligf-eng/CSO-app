@@ -1315,10 +1315,20 @@ with main_tabs[2]:
                     chart_df = pd.DataFrame({'Date': rca_display_df['日期']})
                     
                     for cat_name, cols in status_categories.items():
-                        # 安全機制：只取報表裡真正有的欄位，避免某些工廠沒填欄位導致當機
+                        # 安全機制：只取報表裡真正有的欄位
                         valid_cols = [c for c in cols if c in rca_display_df.columns]
                         if valid_cols:
-                            # 將小數轉換為百分比 (例如 0.84 -> 84%)
+                            # 🛡️ 關鍵修復：上場前強制安檢！把殘留 '%' 符號的純文字強制轉為數值
+                            for c in valid_cols:
+                                if rca_display_df[c].dtype == 'object':
+                                    # 拔掉 % 並除以 100 轉為正確的浮點數，遇到空值補 0
+                                    rca_display_df[c] = pd.to_numeric(
+                                        rca_display_df[c].astype(str).str.replace('%', '', regex=False), 
+                                        errors='coerce'
+                                    ) / 100.0
+                                    rca_display_df[c] = rca_display_df[c].fillna(0)
+                                    
+                            # 將小數轉換為百分比 (例如 0.84 -> 84%) 並加總
                             chart_df[cat_name] = rca_display_df[valid_cols].sum(axis=1) * 100
                         else:
                             chart_df[cat_name] = 0.0
@@ -1344,7 +1354,6 @@ with main_tabs[2]:
                         st.plotly_chart(fig, use_container_width=True)
                         
                     except ImportError:
-                        # 如果環境中尚未安裝 plotly 套件的防呆機制
                         st.bar_chart(chart_df)
 
 # ==============================================================================
