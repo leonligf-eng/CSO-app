@@ -1314,7 +1314,6 @@ with main_tabs[2]:
                     # 建立繪圖專用的 DataFrame
                     chart_df = pd.DataFrame({'Date': rca_display_df['日期']})
                     
-                    # 🛡️ 建立無差別萬用型別轉換器 (專治 Mock Data 與異常字串)
                     def safe_pct_to_float(val):
                         if pd.isna(val): return 0.0
                         if isinstance(val, str):
@@ -1327,16 +1326,32 @@ with main_tabs[2]:
                                 except: return 0.0
                         return float(val)
                     
+                    # 💡 定義哪些狀態是「依附在開機數下」的 (Active Time)
+                    # Idle 和 Other 通常是獨立於開機數之外的 (Non-Active Time)
+                    active_states = ['Run', 'SetUp', 'Clean', 'Corr', 'Rework', 'EQC', 'Down', 'PM', 'E1', 'E2']
+
                     for cat_name, cols in status_categories.items():
-                        # 安全機制：只取報表裡真正有的欄位
                         valid_cols = [c for c in cols if c in rca_display_df.columns]
                         if valid_cols:
-                            # 🛡️ 上場前強制安檢：套用萬用轉換器，把所有東西洗成乾淨的 float
+                            temp_sum = pd.Series(0.0, index=rca_display_df.index)
+                            
                             for c in valid_cols:
-                                rca_display_df[c] = rca_display_df[c].apply(safe_pct_to_float)
+                                # 1. 清洗數值
+                                raw_val = rca_display_df[c].apply(safe_pct_to_float)
                                 
-                            # 將小數轉換為百分比 (例如 0.84 -> 84.0) 並加總
-                            chart_df[cat_name] = rca_display_df[valid_cols].sum(axis=1) * 100
+                                # 2. 🌟 核心修正：統一分母 (Normalization by Active Testers)
+                                # 如果這個狀態屬於「運作狀態」，就必須乘以「開機數」來還原成 24 小時的真實佔比
+                                if c in active_states and '開機數' in rca_display_df.columns:
+                                    # 避免開機數大於 1 時造成比例膨脹，這裡取 min(1, 開機數) 作為防護
+                                    load_factor = rca_display_df['開機數'].apply(lambda x: min(1.0, float(x)) if pd.notna(x) else 1.0)
+                                    real_val = raw_val * load_factor
+                                else:
+                                    # 如果是 Idle/Wait，直接使用原始數值
+                                    real_val = raw_val
+                                    
+                                temp_sum += real_val
+                                
+                            chart_df[cat_name] = temp_sum * 100
                         else:
                             chart_df[cat_name] = 0.0
                             
