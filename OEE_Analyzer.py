@@ -336,14 +336,17 @@ def load_osat_data(file_bytes):
         return None
 
 # ==============================================================================
-# --- 🌟 NEW: 單機 24 小時時間還原推疊圖 (SEMI E10 架構) ---
+# --- 🌟 NEW: 單機 1440 分鐘時間還原推疊圖 (SEMI E10 架構) ---
 # ==============================================================================
 def render_rca_drilldown(df_machine):
     """
-    繪製單機 24 小時時間還原推疊圖 (SEMI E10 架構)
+    繪製單機 1440 分鐘時間還原推疊圖 (SEMI E10 架構)
     df_machine: 傳入包含當天該站點所有機台明細的 DataFrame
     """
-    st.markdown("#### 🔬 Tester 24-Hour Time Allocation (Machine Drill-down)")
+    st.markdown("#### 🔬 Tester 1440-Minute Time Allocation (Machine Drill-down)")
+    
+    # 💡 在標題下方加入明顯的提示語
+    st.caption("💡 **基準換算提示：** 1 天的完整產能 = **1440 分鐘** (24 小時 × 60 分鐘)")
     
     # 建立一個乾淨的 DataFrame 來做計算，避免污染原始資料
     df_calc = df_machine.copy()
@@ -362,35 +365,40 @@ def render_rca_drilldown(df_machine):
         else:
             df_calc[col] = 0.0 # 若無此欄位則補零
 
+    # OSAT 報表的生產時間原本就是分鐘
     df_calc['生產時間'] = df_calc['生產時間'].astype(float)
     
     # ==========================================
-    # 🌟 核心演算法：俄羅斯娃娃 24 小時模型還原
+    # 🌟 核心演算法：俄羅斯娃娃 1440 分鐘模型還原
     # ==========================================
-    # 第一層：生產時間 (小時)
-    df_calc['Prod_Hrs'] = df_calc['生產時間'] / 60.0
+    # 第一層：生產時間 (分鐘)
+    df_calc['Prod_Mins'] = df_calc['生產時間']
     
     # 第二層：未安排生產時間 (Unscheduled Time)
-    df_calc['Unscheduled_Hrs'] = 24.0 - df_calc['Prod_Hrs']
-    df_calc['Unscheduled_Hrs'] = df_calc['Unscheduled_Hrs'].apply(lambda x: max(0, x)) # 防呆，避免負數
+    df_calc['Unscheduled_Mins'] = 1440.0 - df_calc['Prod_Mins']
+    df_calc['Unscheduled_Mins'] = df_calc['Unscheduled_Mins'].apply(lambda x: max(0, x)) # 防呆，避免負數
     
     # 第三層：閒置時間 (Idle)
-    df_calc['Idle_Hrs'] = df_calc['Prod_Hrs'] * df_calc['Idle']
+    df_calc['Idle_Mins'] = df_calc['Prod_Mins'] * df_calc['Idle']
     
     # 第四層：真實運作時間 (Active Time)
-    df_calc['Active_Hrs'] = df_calc['Prod_Hrs'] - df_calc['Idle_Hrs']
+    df_calc['Active_Mins'] = df_calc['Prod_Mins'] - df_calc['Idle_Mins']
     
     # 展開變因 (乘上真實運作時間)
-    df_calc['Run_Hrs'] = df_calc['Active_Hrs'] * df_calc['Run']
-    df_calc['Setup_Hrs'] = df_calc['Active_Hrs'] * df_calc['SetUp']
-    df_calc['Down_Hrs'] = df_calc['Active_Hrs'] * df_calc['Down']
+    df_calc['Run_Mins'] = df_calc['Active_Mins'] * df_calc['Run']
+    df_calc['Setup_Mins'] = df_calc['Active_Mins'] * df_calc['SetUp']
+    df_calc['Down_Mins'] = df_calc['Active_Mins'] * df_calc['Down']
     
     # 其他所有運作狀態加總 (Other, PM, Rework 等)
-    df_calc['Other_Active_Hrs'] = df_calc['Active_Hrs'] - (df_calc['Run_Hrs'] + df_calc['Setup_Hrs'] + df_calc['Down_Hrs'])
-    df_calc['Other_Active_Hrs'] = df_calc['Other_Active_Hrs'].apply(lambda x: max(0, x))
+    df_calc['Other_Active_Mins'] = df_calc['Active_Mins'] - (df_calc['Run_Mins'] + df_calc['Setup_Mins'] + df_calc['Down_Mins'])
+    df_calc['Other_Active_Mins'] = df_calc['Other_Active_Mins'].apply(lambda x: max(0, x))
+
+    # 🧹 數值格式化：四捨五入至小數點後第一位 (解決 Tooltip 顯示過長的問題)
+    for col in ['Unscheduled_Mins', 'Idle_Mins', 'Run_Mins', 'Setup_Mins', 'Down_Mins', 'Other_Active_Mins']:
+        df_calc[col] = df_calc[col].round(1)
 
     # ==========================================
-    # 📊 繪製 Plotly 24 小時推疊圖
+    # 📊 繪製 Plotly 1440 分鐘推疊圖
     # ==========================================
     fig = go.Figure()
 
@@ -398,32 +406,32 @@ def render_rca_drilldown(df_machine):
     
     # 🟢 1. Value Adding (Run)
     fig.add_trace(go.Bar(
-        name='Value Adding (Run)', x=df_calc['機台代號'], y=df_calc['Run_Hrs'], 
-        marker_color='#5CB85C', hoverinfo='x+name+y', text=df_calc['Run_Hrs'].round(1)
+        name='Value Adding (Run)', x=df_calc['機台代號'], y=df_calc['Run_Mins'], 
+        marker_color='#5CB85C', text=df_calc['Run_Mins'].round(0), hoverinfo='x+name+y'
     ))
     # 🟡 2. Process Loss (Setup)
     fig.add_trace(go.Bar(
-        name='Process Loss (Setup)', x=df_calc['機台代號'], y=df_calc['Setup_Hrs'], 
+        name='Process Loss (Setup)', x=df_calc['機台代號'], y=df_calc['Setup_Mins'], 
         marker_color='#F0AD4E', hoverinfo='x+name+y'
     ))
     # 🔴 3. Equipment Loss (Down)
     fig.add_trace(go.Bar(
-        name='Equipment Loss (Down)', x=df_calc['機台代號'], y=df_calc['Down_Hrs'], 
+        name='Equipment Loss (Down)', x=df_calc['機台代號'], y=df_calc['Down_Mins'], 
         marker_color='#D9534F', hoverinfo='x+name+y'
     ))
     # 🟣 4. Other Active (PM, Rework...)
     fig.add_trace(go.Bar(
-        name='Other Active States', x=df_calc['機台代號'], y=df_calc['Other_Active_Hrs'], 
+        name='Other Active States', x=df_calc['機台代號'], y=df_calc['Other_Active_Mins'], 
         marker_color='#9B59B6', hoverinfo='x+name+y'
     ))
     # 🌫️ 5. Starvation (Idle)
     fig.add_trace(go.Bar(
-        name='Starvation (Idle)', x=df_calc['機台代號'], y=df_calc['Idle_Hrs'], 
+        name='Starvation (Idle)', x=df_calc['機台代號'], y=df_calc['Idle_Mins'], 
         marker_color='#95A5A6', hoverinfo='x+name+y'
     ))
     # ⬜ 6. Unscheduled Time (未安排生產/黑洞)
     fig.add_trace(go.Bar(
-        name='Unscheduled (No Target)', x=df_calc['機台代號'], y=df_calc['Unscheduled_Hrs'], 
+        name='Unscheduled (No Target)', x=df_calc['機台代號'], y=df_calc['Unscheduled_Mins'], 
         marker_color='rgba(236, 240, 241, 0.5)',  # 半透明淺灰
         marker_line_color='#BDC3C7', marker_line_width=1.5, hoverinfo='x+name+y'
     ))
@@ -431,8 +439,12 @@ def render_rca_drilldown(df_machine):
     # 圖表排版設定
     fig.update_layout(
         barmode='stack',
-        title='SEMI E10 Standard: 24-Hour Tester Utilization',
-        yaxis=dict(title='Hours', range=[0, 24], dtick=2), # Y 軸強制定在 24 小時
+        title='SEMI E10 Standard: 1440-Minute Tester Utilization',
+        yaxis=dict(
+            title='Minutes (mins)', 
+            range=[0, 1440], 
+            dtick=120  # 每 120 分鐘 (2 小時) 畫一條橫向網格線，方便工程師快速估算
+        ), 
         xaxis=dict(title='Machine ID', tickangle=-45),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         plot_bgcolor='white',
@@ -443,6 +455,7 @@ def render_rca_drilldown(df_machine):
     fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
 
     st.plotly_chart(fig, use_container_width=True)
+
 
 # ==============================================================================
 # --- 🌟 核心防護網：檔案變更與全面狀態清理 (File Change Detector) ---
