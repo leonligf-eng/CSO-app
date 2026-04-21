@@ -1258,24 +1258,94 @@ with main_tabs[2]:
                     st.dataframe(top_rework_display, use_container_width=True, hide_index=True)
 
             # --- 🟣 Module C: Cross-Validation & RCA System ---
-            with osat_tabs[2]:
-                st.markdown("### 🕵️ Reverse Engineering (RCA Dashboard)")
-                st.caption("Combine Station Output with Tester Status to find hidden anomalies.")
-                st.info("💡 **Feature Blueprint:** This module will eventually feature an interactive scatter plot allowing you to click an outlier tester and instantly see if it was secretly assigned to a high-yield or slow-running OpNo, breaking down the 'Mixed Operation' illusion.")
-                
-                st.write(f"Cleaned Station Data (`df_station_summary`) for {selected_osat_op}")
-                
-                # Ensure column headers are in English for the UI display
-                rca_display_df = op_station_df[['日期', '站點', '開機數', '正測顆數', 'OEE', 'True_OEE', 'Expected_Output']].rename(
-                    columns={
-                        '日期': 'Date', 
-                        '站點': 'Operation', 
-                        '開機數': 'Active Testers', 
-                        '正測顆數': 'Actual Output Qty'
+                with osat_tabs[2]:
+                    st.markdown("### 🕵️ Reverse Engineering (RCA Dashboard)")
+                    st.caption("Combine Station Output with Tester Status to find hidden anomalies.")
+                    
+                    # ==========================================
+                    # 1. 精美數據表：UPD 與 OEE 百分比呈現
+                    # ==========================================
+                    st.markdown("#### 📊 Daily Production & Gap Analysis")
+                    
+                    rca_display_df = op_station_df.copy()
+                    
+                    # 將 OEE 轉換為百分比數字 (例如 0.76 -> 76.0)
+                    rca_display_df['OEE_Pct'] = rca_display_df['OEE'] * 100
+                    rca_display_df['True_OEE_Pct'] = rca_display_df['True_OEE'] * 100
+                    
+                    # 計算 UPD_Gap (實際產出 - 目標產出)
+                    rca_display_df['UPD_Gap'] = rca_display_df['正測顆數'] - rca_display_df['Expected_Output']
+                    
+                    # 篩選並排列要顯示的欄位
+                    table_df = rca_display_df[['日期', '站點', '開機數', '正測顆數', 'Expected_Output', 'UPD_Gap', 'OEE_Pct', 'True_OEE_Pct']]
+                    
+                    # 使用 Streamlit 的 column_config 進行高質感渲染
+                    st.dataframe(
+                        table_df,
+                        hide_index=True,
+                        use_container_width=True,
+                        column_config={
+                            "日期": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
+                            "站點": st.column_config.TextColumn("Operation"),
+                            "開機數": st.column_config.NumberColumn("Active Testers", format="%.2f"),
+                            "正測顆數": st.column_config.NumberColumn("Actual UPD", format="%d ea"),
+                            "Expected_Output": st.column_config.NumberColumn("Target UPD", format="%d ea"),
+                            "UPD_Gap": st.column_config.NumberColumn("UPD Gap", format="%d ea"),
+                            "OEE_Pct": st.column_config.NumberColumn("OSAT OEE", format="%.2f %%"),
+                            "True_OEE_Pct": st.column_config.NumberColumn("True OEE", format="%.2f %%")
+                        }
+                    )
+                    
+                    st.markdown("---")
+                    
+                    # ==========================================
+                    # 2. 四大分類狀態圖表 (4-Category Breakdown)
+                    # ==========================================
+                    st.markdown("#### ⏱️ Tester Time Allocation (Root Cause Breakdown)")
+                    
+                    # 💡 將 12 個複雜的變因，歸納為工程師一看就懂的 4 大類
+                    status_categories = {
+                        'Value Adding (Run)': ['Run'],
+                        'Process Loss (Setup/Adjust)': ['SetUp', 'Clean', 'Corr', 'Rework', 'EQC'],
+                        'Equipment Loss (Down/PM)': ['Down', 'PM', 'E1', 'E2'],
+                        'Starvation (Idle/Wait)': ['Idle', 'Other']
                     }
-                )
-                st.dataframe(rca_display_df, hide_index=True)
-
+                    
+                    # 建立繪圖專用的 DataFrame
+                    chart_df = pd.DataFrame({'Date': rca_display_df['日期']})
+                    
+                    for cat_name, cols in status_categories.items():
+                        # 安全機制：只取報表裡真正有的欄位，避免某些工廠沒填欄位導致當機
+                        valid_cols = [c for c in cols if c in rca_display_df.columns]
+                        if valid_cols:
+                            # 將小數轉換為百分比 (例如 0.84 -> 84%)
+                            chart_df[cat_name] = rca_display_df[valid_cols].sum(axis=1) * 100
+                        else:
+                            chart_df[cat_name] = 0.0
+                            
+                    chart_df.set_index('Date', inplace=True)
+                    
+                    # 繪製圖表 (優先使用 Plotly 來支援自訂語意顏色，若無安裝則退回原生圖表)
+                    try:
+                        import plotly.express as px
+                        fig = px.bar(
+                            chart_df.reset_index(),
+                            x='Date',
+                            y=list(status_categories.keys()),
+                            color_discrete_map={
+                                'Value Adding (Run)': '#22c55e',       # 🟢 綠色：正常生產
+                                'Process Loss (Setup/Adjust)': '#eab308', # 🟡 黃色：調機/重工
+                                'Equipment Loss (Down/PM)': '#ef4444',    # 🔴 紅色：當機/保養
+                                'Starvation (Idle/Wait)': '#94a3b8'       # ⚪ 灰色：閒置/沒貨
+                            },
+                            labels={'value': 'Percentage (%)', 'variable': 'Category'}
+                        )
+                        fig.update_layout(barmode='stack', yaxis_title="Time Ratio (%)", legend_title_text="Status Category")
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                    except ImportError:
+                        # 如果環境中尚未安裝 plotly 套件的防呆機制
+                        st.bar_chart(chart_df)
 
 # ==============================================================================
 # --- 📊 返回 Tab 1 剩餘執行區段 (含 st.stop 防呆) ---
