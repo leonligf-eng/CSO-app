@@ -1320,12 +1320,37 @@ with main_tabs[2]:
                 with mode_a_tabs[1]:
                     st.markdown("#### 📉 Station Waste Trend")
                     st.caption("Analyze macro waste distribution and daily trends across the selected operation.")
-                    trend_df = op_station_df.copy()
-                    trend_df['Run_Cat'] = trend_df['Run']
-                    trend_df['Process_Cat'] = safe_sum_cols(trend_df, ['SetUp', 'Rework', 'Clean', 'Corr', 'EQC'])
-                    trend_df['Down_Cat'] = safe_sum_cols(trend_df, ['Down', 'PM', 'E1', 'E2'])
-                    trend_df['Idle_Cat'] = safe_sum_cols(trend_df, ['Idle', 'Other'])
                     
+                    # ==========================================
+                    # 🌟 1. 修正大於 100% 的「俄羅斯娃娃」維度降級演算法
+                    # ==========================================
+                    trend_df = op_station_df.copy()
+                    
+                    # 取得原始報表上的百分比 (未校正前)
+                    raw_run = trend_df['Run']
+                    raw_proc = safe_sum_cols(trend_df, ['SetUp', 'Rework', 'Clean', 'Corr', 'EQC'])
+                    raw_down = safe_sum_cols(trend_df, ['Down', 'PM', 'E1', 'E2'])
+                    raw_idle = safe_sum_cols(trend_df, ['Idle', 'Other'])
+                    
+                    # 核心還原：將 Run/Setup/Down 的比例，壓縮回「生產時間」的絕對維度中
+                    # 開機運作時間的佔比 = 100% - Idle%
+                    active_ratio = (1.0 - raw_idle).apply(lambda x: max(0, x))
+                    
+                    trend_df['Run_Cat'] = raw_run * active_ratio
+                    trend_df['Process_Cat'] = raw_proc * active_ratio
+                    trend_df['Down_Cat'] = raw_down * active_ratio
+                    trend_df['Idle_Cat'] = raw_idle  # Idle 本身就是基於生產時間，所以直接沿用
+                    
+                    # 安全防呆：確保每天的這四塊加起來絕對等於 100% (消除微小進位誤差)
+                    total_sum = trend_df['Run_Cat'] + trend_df['Process_Cat'] + trend_df['Down_Cat'] + trend_df['Idle_Cat']
+                    trend_df['Run_Cat'] = trend_df['Run_Cat'] / total_sum
+                    trend_df['Process_Cat'] = trend_df['Process_Cat'] / total_sum
+                    trend_df['Down_Cat'] = trend_df['Down_Cat'] / total_sum
+                    trend_df['Idle_Cat'] = trend_df['Idle_Cat'] / total_sum
+                    
+                    # ==========================================
+                    # 2. 計算總體圓餅圖的加權平均
+                    # ==========================================
                     total_active_machines = trend_df['開機數'].sum()
                     if total_active_machines > 0:
                         avg_run = (trend_df['Run_Cat'] * trend_df['開機數']).sum() / total_active_machines
@@ -1337,22 +1362,77 @@ with main_tabs[2]:
                     
                     c_pie, c_bar = st.columns([1, 2])
                     with c_pie:
-                        fig_donut = go.Figure(data=[go.Pie(labels=['Run', 'Setup', 'Down', 'Idle'], values=[avg_run, avg_proc, avg_down, avg_idle], hole=.4, marker_colors=['#5CB85C', '#F0AD4E', '#D9534F', '#95A5A6'])])
-                        fig_donut.update_layout(title_text="Overall Waste Distribution", annotations=[dict(text='Avg %', x=0.5, y=0.5, font_size=16, showarrow=False)], showlegend=False, margin=dict(t=40, b=0, l=0, r=0))
+                        fig_donut = go.Figure(data=[go.Pie(
+                            labels=['Run', 'Setup', 'Down', 'Idle'],
+                            values=[avg_run, avg_proc, avg_down, avg_idle],
+                            hole=.4,
+                            marker_colors=['#5CB85C', '#F0AD4E', '#D9534F', '#95A5A6']
+                        )])
+                        fig_donut.update_layout(
+                            title_text="Overall Waste Distribution",
+                            annotations=[dict(text='Avg %', x=0.5, y=0.5, font_size=16, showarrow=False)],
+                            showlegend=False,
+                            margin=dict(t=40, b=0, l=0, r=0)
+                        )
                         st.plotly_chart(fig_donut, use_container_width=True)
+                    
                     with c_bar:
                         fig_trend = go.Figure()
                         fig_trend.add_trace(go.Bar(x=trend_df['日期'], y=trend_df['Run_Cat']*100, name='Run', marker_color='#5CB85C'))
                         fig_trend.add_trace(go.Bar(x=trend_df['日期'], y=trend_df['Process_Cat']*100, name='Setup', marker_color='#F0AD4E'))
                         fig_trend.add_trace(go.Bar(x=trend_df['日期'], y=trend_df['Down_Cat']*100, name='Down', marker_color='#D9534F'))
                         fig_trend.add_trace(go.Bar(x=trend_df['日期'], y=trend_df['Idle_Cat']*100, name='Idle', marker_color='#95A5A6'))
-                        fig_trend.update_layout(title="Daily Waste Trend (100% Normalized Active Time)", barmode='stack', yaxis_title="Percentage (%)", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), hovermode="x unified")
+                        
+                        fig_trend.update_layout(
+                            title="Daily Waste Trend (100% Normalized Production Time)",
+                            barmode='stack',
+                            yaxis_title="Percentage (%)",
+                            yaxis=dict(range=[0, 100]), # 🌟 強制 Y 軸封頂在 100%
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                            hovermode="x unified",
+                            hoverlabel=dict(namelength=-1)
+                        )
                         st.plotly_chart(fig_trend, use_container_width=True)
                     
                     st.markdown("---")
+                    
+                    # ==========================================
+                    # 🌟 3. Raw Data 精美格式化 (小數點 2 位與百分比)
+                    # ==========================================
                     st.markdown("#### 📋 Station Level Raw Data")
                     with st.expander("Click to view full station records (Sortable)"):
-                        st.dataframe(op_station_df, use_container_width=True)
+                        display_df = op_station_df.copy()
+                        
+                        # 建立欄位顯示設定 (Column Config)
+                        col_configs = {
+                            "日期": st.column_config.DateColumn("日期", format="YYYY-MM-DD")
+                        }
+                        
+                        # 我們之前在解析 OSAT Excel 時所定義的百分比欄位清單
+                        pct_cols = [
+                            'E%', 'E_DO1%', 'DutOff%', '重工效率', '總產出效率', 
+                            'Run', 'Rework', 'SetUp', 'Down', 'Idle', 'PM', 'Other', 'OEE',
+                            'Clean', 'Corr', 'EQC', 'E1', 'E2'
+                        ]
+                        
+                        for col in display_df.columns:
+                            if col in pct_cols:
+                                # 將原本的 0.9023 乘回 100 變成 90.23，並加上 % 符號顯示
+                                display_df[col] = display_df[col] * 100 
+                                col_configs[col] = st.column_config.NumberColumn(col, format="%.2f %%")
+                            elif col in ['開機數']:
+                                # 開機數保留兩位小數點
+                                col_configs[col] = st.column_config.NumberColumn(col, format="%.2f")
+                            elif col in ['正測顆數', '測試顆數', '產出良品數', '生產時間', 'Expected_Output', 'Max_Possible_Output']:
+                                # 顆數與分鐘數顯示為整數
+                                col_configs[col] = st.column_config.NumberColumn(col, format="%d")
+                        
+                        st.dataframe(
+                            display_df, 
+                            use_container_width=True, 
+                            hide_index=True, 
+                            column_config=col_configs
+                        )
                         
         else:
             # ==========================================
