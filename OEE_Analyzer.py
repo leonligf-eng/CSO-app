@@ -393,7 +393,7 @@ def render_rca_drilldown(df_machine):
     df_calc['Other_Active_Mins'] = df_calc['Active_Mins'] - (df_calc['Run_Mins'] + df_calc['Setup_Mins'] + df_calc['Down_Mins'])
     df_calc['Other_Active_Mins'] = df_calc['Other_Active_Mins'].apply(lambda x: max(0, x))
 
-    # 🧹 數值格式化：四捨五入至小數點後第一位 (解決 Tooltip 顯示過長的問題)
+    # 🧹 數值格式化：四捨五入至小數點後第一位
     for col in ['Unscheduled_Mins', 'Idle_Mins', 'Run_Mins', 'Setup_Mins', 'Down_Mins', 'Other_Active_Mins']:
         df_calc[col] = df_calc[col].round(1)
 
@@ -447,7 +447,7 @@ def render_rca_drilldown(df_machine):
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         plot_bgcolor='white',
         hovermode="x unified",
-        # 🌟 加上這行保險設定，確保即使未來字變長，也不會被隨意截斷 (namelength=-1)
+        # 🌟 保險設定：避免 Hover Tooltip 文字被截斷
         hoverlabel=dict(namelength=-1) 
     )
     
@@ -455,6 +455,11 @@ def render_rca_drilldown(df_machine):
     fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
 
     st.plotly_chart(fig, use_container_width=True)
+
+# 輔助安全加總函數 (給 Tab 2 使用)
+def safe_sum_cols(df, cols):
+    valid_cols = [c for c in cols if c in df.columns]
+    return df[valid_cols].sum(axis=1) if valid_cols else pd.Series(0, index=df.index)
 
 
 # ==============================================================================
@@ -510,7 +515,6 @@ st.sidebar.divider()
 
 # ==============================================================================
 # --- 頂層架構切分 (Main Tabs) ---
-# 🌟 修改：新增了第三個 Tab 專供 OSAT Monitor 使用
 # ==============================================================================
 main_tabs = st.tabs(["📊 OEE Analyzer", "🧬 Overall Build Yield", "🏭 OSAT OEE Monitor"])
 
@@ -1277,10 +1281,11 @@ with main_tabs[2]:
             out_val = f"+{output_gap:,.0f}" if output_gap > 0 else f"{output_gap:,.0f}"
 
             # ==========================================
-            # 🎨 Display Alignment Dashboard (Dynamic UI)
+            # 🎨 終極 3-Tab 架構 (Macro ➔ Mid ➔ Micro)
             # ==========================================
-            osat_tabs = st.tabs(["🎯 Operation (OEE Alignment)", "📉 Tester Health & Waste", "🕵️ Cross-Validation & RCA"])
+            osat_tabs = st.tabs(["🎯 Operation (Alignment & Summary)", "📉 Station Waste Trend", "🕵️ Machine RCA Drill-down"])
             
+            # --- 🟢 Tab 1 (Macro): 站點總覽與對齊 ---
             with osat_tabs[0]:
                 st.markdown("### ⚖️ Performance Alignment: Internal Target vs. OSAT Reported")
                 col1, col2, col3 = st.columns(3)
@@ -1333,75 +1338,19 @@ with main_tabs[2]:
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
                 st.plotly_chart(fig_oee, use_container_width=True)
-
-            # --- 🔴 Module B: Tester Health & Waste Analysis ---
-            with osat_tabs[1]:
-                st.markdown("### 🏥 Tester Time State Breakdown")
-                st.caption("Excludes ghost testers. Analyzes purely where physical time is spent.")
                 
-                available_dates = df_machine['日期'].unique().tolist()
-                col_d, _ = st.columns([1, 3])
-                with col_d:
-                    selected_date = st.selectbox("Select Date for Health Check:", available_dates)
+                st.markdown("---")
                 
-                daily_machine_df = df_machine[df_machine['日期'] == selected_date].copy()
-                
-                if daily_machine_df.empty:
-                    st.warning("No tester data available for this date.")
-                else:
-                    state_cols = ['Run', 'Rework', 'SetUp', 'Down', 'Idle', 'PM', 'Other']
-                    colors = ['#22C55E', '#F59E0B', '#FCD34D', '#EF4444', '#94A3B8', '#8B5CF6', '#E2E8F0']
-                    
-                    fig_health = go.Figure()
-                    for col, color in zip(state_cols, colors):
-                        if col in daily_machine_df.columns:
-                            fig_health.add_trace(go.Bar(
-                                x=daily_machine_df['機台代號'], y=daily_machine_df[col] * 100, 
-                                name=col, marker_color=color
-                            ))
-                            
-                    fig_health.update_layout(
-                        barmode='stack',
-                        title=f"Tester Health Distribution on {selected_date}",
-                        yaxis_title="Time Allocation (%)",
-                        xaxis_title="",
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                    )
-                    st.plotly_chart(fig_health, use_container_width=True)
-
-                    st.markdown("#### ⚠️ Top Yield Killers (Highest Rework%)")
-                    top_rework = daily_machine_df[['機台代號', '正測顆數', 'Rework', 'Down', 'Idle']].sort_values(by='Rework', ascending=False).head(5)
-                    top_rework['Rework'] = top_rework['Rework'].apply(lambda x: f"{x*100:.1f}%")
-                    top_rework['Down'] = top_rework['Down'].apply(lambda x: f"{x*100:.1f}%")
-                    top_rework['Idle'] = top_rework['Idle'].apply(lambda x: f"{x*100:.1f}%")
-                    
-                    # Ensure column headers are in English for the UI display
-                    top_rework_display = top_rework.rename(columns={'機台代號': 'Tester ID', '正測顆數': 'Test Qty'})
-                    st.dataframe(top_rework_display, use_container_width=True, hide_index=True)
-
-            # --- 🟣 Module C: Cross-Validation & RCA System ---
-            with osat_tabs[2]:
-                st.markdown("### 🕵️ Reverse Engineering (RCA Dashboard)")
-                st.caption("Combine Station Output with Tester Status to find hidden anomalies.")
-                
-                # ==========================================
-                # 1. 精美數據表：UPD 與 OEE 百分比呈現
-                # ==========================================
+                # 搬移過來的 Daily Production & Gap Analysis Table
                 st.markdown("#### 📊 Daily Production & Gap Analysis")
                 
                 rca_display_df = op_station_df.copy()
-                
-                # 將 OEE 轉換為百分比數字 (例如 0.76 -> 76.0)
                 rca_display_df['OEE_Pct'] = rca_display_df['OEE'] * 100
                 rca_display_df['True_OEE_Pct'] = rca_display_df['True_OEE'] * 100
-                
-                # 計算 UPD_Gap (實際產出 - 目標產出)
                 rca_display_df['UPD_Gap'] = rca_display_df['正測顆數'] - rca_display_df['Expected_Output']
                 
-                # 篩選並排列要顯示的欄位
                 table_df = rca_display_df[['日期', '站點', '開機數', '正測顆數', 'Expected_Output', 'UPD_Gap', 'OEE_Pct', 'True_OEE_Pct']]
                 
-                # 使用 Streamlit 的 column_config 進行高質感渲染
                 st.dataframe(
                     table_df,
                     hide_index=True,
@@ -1417,12 +1366,75 @@ with main_tabs[2]:
                         "True_OEE_Pct": st.column_config.NumberColumn("True OEE", format="%.2f %%")
                     }
                 )
+
+            # --- 🟡 Tab 2 (Mid): 站點浪費趨勢 ---
+            with osat_tabs[1]:
+                st.markdown("### 📉 Station Waste Trend")
+                st.caption("Analyze macro waste distribution and daily trends across the selected operation.")
+                
+                # 整理 4 大分類資料 (加權平均)
+                trend_df = op_station_df.copy()
+                trend_df['Run_Cat'] = trend_df['Run']
+                trend_df['Process_Cat'] = safe_sum_cols(trend_df, ['SetUp', 'Rework', 'Clean', 'Corr', 'EQC'])
+                trend_df['Down_Cat'] = safe_sum_cols(trend_df, ['Down', 'PM', 'E1', 'E2'])
+                trend_df['Idle_Cat'] = safe_sum_cols(trend_df, ['Idle', 'Other'])
+                
+                total_active_machines = trend_df['開機數'].sum()
+                if total_active_machines > 0:
+                    avg_run = (trend_df['Run_Cat'] * trend_df['開機數']).sum() / total_active_machines
+                    avg_proc = (trend_df['Process_Cat'] * trend_df['開機數']).sum() / total_active_machines
+                    avg_down = (trend_df['Down_Cat'] * trend_df['開機數']).sum() / total_active_machines
+                    avg_idle = (trend_df['Idle_Cat'] * trend_df['開機數']).sum() / total_active_machines
+                else:
+                    avg_run, avg_proc, avg_down, avg_idle = 0, 0, 0, 0
+                
+                c_pie, c_bar = st.columns([1, 2])
+                
+                # 1. 圓餅圖 (Donut Chart)
+                with c_pie:
+                    fig_donut = go.Figure(data=[go.Pie(
+                        labels=['Run', 'Setup', 'Down', 'Idle'],
+                        values=[avg_run, avg_proc, avg_down, avg_idle],
+                        hole=.4,
+                        marker_colors=['#5CB85C', '#F0AD4E', '#D9534F', '#95A5A6']
+                    )])
+                    fig_donut.update_layout(
+                        title_text="Overall Waste Distribution",
+                        annotations=[dict(text='Avg %', x=0.5, y=0.5, font_size=16, showarrow=False)],
+                        showlegend=False,
+                        margin=dict(t=40, b=0, l=0, r=0)
+                    )
+                    st.plotly_chart(fig_donut, use_container_width=True)
+                
+                # 2. 堆疊趨勢圖 (Daily Trend)
+                with c_bar:
+                    fig_trend = go.Figure()
+                    fig_trend.add_trace(go.Bar(x=trend_df['日期'], y=trend_df['Run_Cat']*100, name='Run', marker_color='#5CB85C'))
+                    fig_trend.add_trace(go.Bar(x=trend_df['日期'], y=trend_df['Process_Cat']*100, name='Setup', marker_color='#F0AD4E'))
+                    fig_trend.add_trace(go.Bar(x=trend_df['日期'], y=trend_df['Down_Cat']*100, name='Down', marker_color='#D9534F'))
+                    fig_trend.add_trace(go.Bar(x=trend_df['日期'], y=trend_df['Idle_Cat']*100, name='Idle', marker_color='#95A5A6'))
+                    
+                    fig_trend.update_layout(
+                        title="Daily Waste Trend (100% Normalized Active Time)",
+                        barmode='stack',
+                        yaxis_title="Percentage (%)",
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                        hovermode="x unified"
+                    )
+                    st.plotly_chart(fig_trend, use_container_width=True)
                 
                 st.markdown("---")
                 
-                # ==========================================
-                # 🌟 2. SEMI E10 24-Hour Machine Drill-down
-                # ==========================================
+                # 3. 站點級 Raw Data
+                st.markdown("#### 📋 Station Level Raw Data")
+                with st.expander("Click to view full station records (Sortable)"):
+                    st.dataframe(op_station_df, use_container_width=True)
+
+            # --- 🔴 Tab 3 (Micro): 單機 RCA 下鑽分析 ---
+            with osat_tabs[2]:
+                st.markdown("### 🕵️ Machine RCA Drill-down")
+                st.caption("Deep dive into specific dates to identify bottleneck testers and unaccounted time.")
+                
                 available_rca_dates = df_machine['日期'].unique().tolist()
                 
                 if not available_rca_dates:
@@ -1434,9 +1446,29 @@ with main_tabs[2]:
                     
                     rca_machine_df = df_machine[df_machine['日期'] == selected_rca_date].copy()
                     
-                    # 呼叫整合進來的函式，畫出強大的 24 小時堆疊圖！
+                    # 1. 呼叫 1440-Minute 堆疊圖
                     render_rca_drilldown(rca_machine_df)
-
+                    
+                    st.markdown("---")
+                    
+                    col_kw1, col_kw2 = st.columns(2)
+                    
+                    # 2. 搬移過來的 Top Yield/Time Killers
+                    with col_kw1:
+                        st.markdown("#### ⚠️ Top Yield Killers (Highest Rework & Down)")
+                        top_rework = rca_machine_df[['機台代號', '正測顆數', 'Rework', 'Down', 'Idle']].sort_values(by=['Down', 'Rework'], ascending=[False, False]).head(5)
+                        top_rework['Rework'] = top_rework['Rework'].apply(lambda x: f"{x*100:.1f}%")
+                        top_rework['Down'] = top_rework['Down'].apply(lambda x: f"{x*100:.1f}%")
+                        top_rework['Idle'] = top_rework['Idle'].apply(lambda x: f"{x*100:.1f}%")
+                        
+                        top_rework_display = top_rework.rename(columns={'機台代號': 'Tester ID', '正測顆數': 'Test Qty'})
+                        st.dataframe(top_rework_display, use_container_width=True, hide_index=True)
+                    
+                    # 3. 補上單機原始日誌
+                    with col_kw2:
+                        st.markdown("#### 📋 Machine Level Raw Data (Evidence)")
+                        st.caption("Screenshot this raw data for OSAT auditing.")
+                        st.dataframe(rca_machine_df, use_container_width=True, hide_index=True)
 
 # ==============================================================================
 # --- 📊 返回 Tab 1 剩餘執行區段 (含 st.stop 防呆) ---
