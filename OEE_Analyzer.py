@@ -1214,8 +1214,8 @@ with main_tabs[2]:
         # 🔍 【頂部控制區】
         st.markdown("#### 🔍 Filter & Settings")
         
-        # 🌟 修正 2: 將 Config 移上來，與 Date 排在同一列 (四個 Column)
-        col_cat, col_st, col_date, col_cfg = st.columns([1, 1, 1.2, 1.5])
+        # 🌟 修正 1: 乾淨的 4 個 Column
+        col_cat, col_st, col_date, col_cfg = st.columns([1, 1, 1.2, 1.8])
         
         with col_cat:
             selected_cat = st.selectbox("1. Equipment Group", options=list(active_categories.keys()))
@@ -1236,30 +1236,38 @@ with main_tabs[2]:
                 st.warning("No dates available for this station.")
                 st.stop()
 
+        is_ate_track = selected_cat == "ATE"
+        
         with col_cfg:
-            with st.expander("⚙️ Target & Speed Config", expanded=False):
-                is_ate_track = selected_cat == "ATE"
+            if is_ate_track:
+                # 🌟 直接呈現文字，透過 padding-top 與左側 Selectbox 完美對齊
+                st.markdown(f"""
+                    <div style='padding-top: 28px; line-height: 1.4;'>
+                        <div style='font-size: 13px; color: #64748b;'>🔗 Linked to Global Calc</div>
+                        <div style='font-size: 15px; color: #0369a1; font-weight: 700;'>TT: {calc_test_time}s | Site: {calc_site}</div>
+                    </div>
+                """, unsafe_allow_html=True)
                 
-                if is_ate_track:
-                    st.markdown("<div style='padding-top: 4px; font-size: 13px; color: #64748b;'>🔗 Linked to Global Calc</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div style='font-size: 14px; color: #0369a1; font-weight: 700;'>TT: {calc_test_time}s | Site: {calc_site}</div>", unsafe_allow_html=True)
-                        
-                    ie_max_upd = (86400 / calc_test_time) * int(calc_site) if calc_test_time > 0 else 0
-                    ie_target_upd = single_cap
-                    ie_oee = calc_oee
-                    speed_label = "TT"
-                    speed_unit = "s"
-                    ie_speed_val = calc_test_time
-                else:
-                    std_uph = st.number_input("Standard UPH", min_value=1, value=1000, step=100)
-                    local_target_oee = st.number_input("Target OEE %", min_value=0.0, max_value=100.0, value=85.0, step=1.0)
-                        
-                    ie_max_upd = std_uph * 24
-                    ie_target_upd = ie_max_upd * (local_target_oee / 100.0)
-                    ie_oee = local_target_oee
-                    speed_label = "UPH"
-                    speed_unit = "ea/hr"
-                    ie_speed_val = std_uph
+                ie_max_upd = (86400 / calc_test_time) * int(calc_site) if calc_test_time > 0 else 0
+                ie_target_upd = single_cap
+                ie_oee = calc_oee
+                speed_label = "TT"
+                speed_unit = "s"
+                ie_speed_val = calc_test_time
+            else:
+                # 非 ATE 則在該 Column 內切分兩個子欄位顯示輸入框
+                sub_col1, sub_col2 = st.columns(2)
+                with sub_col1:
+                    std_uph = st.number_input("4. Standard UPH", min_value=1, value=1000, step=100)
+                with sub_col2:
+                    local_target_oee = st.number_input("5. Target OEE %", min_value=0.0, max_value=100.0, value=85.0, step=1.0)
+                    
+                ie_max_upd = std_uph * 24
+                ie_target_upd = ie_max_upd * (local_target_oee / 100.0)
+                ie_oee = local_target_oee
+                speed_label = "UPH"
+                speed_unit = "ea/hr"
+                ie_speed_val = std_uph
 
         st.divider()
 
@@ -1306,7 +1314,7 @@ with main_tabs[2]:
             out_label = "Out GAP (Below Target)" if is_out_error else "Out GAP"
             out_val = f"+{output_gap:,.0f}" if output_gap > 0 else f"{output_gap:,.0f}"
 
-            # 🔥 提取 Retest Rate (重工率) - 25% 標準
+            # 🔥 提取 Retest Rate (重工率)
             rework_rate = day_station_df['Rework'].iloc[0]
             is_rework_error = rework_rate > 0.25
             rework_str = f"{rework_rate*100:.1f}"
@@ -1348,20 +1356,22 @@ with main_tabs[2]:
         # 🗂️ 【Layer 1.5：站點層級 Raw Data】
         # ==========================================
         with st.expander(f"🗂️ View Station Level Raw Data ({selected_osat_op})", expanded=False):
-            # 🌟 修正 3: 將標題與 Toggle 水平對齊並排
-            col_rtitle, col_rtoggle = st.columns([3, 1.2])
-            with col_rtitle:
-                st.markdown("#### 📋 Station Level Raw Data")
-            with col_rtoggle:
-                st.markdown("<div style='padding-top: 5px;'></div>", unsafe_allow_html=True)
+            st.markdown("#### 📋 Station Level Raw Data")
+            
+            # 🌟 修正 2: 將 Toggle 與 Caption 排在同一行 (左邊開關，右邊文字)
+            col_tog, col_cap = st.columns([1.2, 4])
+            with col_tog:
                 apply_date_filter = st.toggle(f"Filter by ({selected_date})", value=True)
+            with col_cap:
+                if apply_date_filter:
+                    st.markdown(f"<div style='padding-top: 10px; font-size: 14px; color: #64748b;'>Showing reporting data for <b>{selected_osat_op}</b> on <b>{selected_date}</b>.</div>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<div style='padding-top: 10px; font-size: 14px; color: #64748b;'>Showing historical reporting data for <b>{selected_osat_op}</b> across all available dates.</div>", unsafe_allow_html=True)
             
             # 根據開關決定要抓單日還是全歷史資料
             if apply_date_filter:
-                st.caption(f"Showing reporting data for {selected_osat_op} on {selected_date}.")
                 display_station_df = df_station_all[(df_station_all['站點'] == selected_osat_op) & (df_station_all['日期'] == selected_date)].copy()
             else:
-                st.caption(f"Showing historical reporting data for {selected_osat_op} across all available dates.")
                 display_station_df = df_station_all[df_station_all['站點'] == selected_osat_op].copy()
                 
             # 按日期降冪排列 (方便看趨勢)
