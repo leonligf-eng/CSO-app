@@ -1214,7 +1214,6 @@ with main_tabs[2]:
         # 🔍 【頂部控制區】
         st.markdown("#### 🔍 Filter & Settings")
         
-        # 🌟 修正 1: 乾淨的 4 個 Column
         col_cat, col_st, col_date, col_cfg = st.columns([1, 1, 1.2, 1.8])
         
         with col_cat:
@@ -1240,7 +1239,6 @@ with main_tabs[2]:
         
         with col_cfg:
             if is_ate_track:
-                # 🌟 直接呈現文字，透過 padding-top 與左側 Selectbox 完美對齊
                 st.markdown(f"""
                     <div style='padding-top: 28px; line-height: 1.4;'>
                         <div style='font-size: 13px; color: #64748b;'>🔗 Linked to Global Calc</div>
@@ -1255,7 +1253,6 @@ with main_tabs[2]:
                 speed_unit = "s"
                 ie_speed_val = calc_test_time
             else:
-                # 非 ATE 則在該 Column 內切分兩個子欄位顯示輸入框
                 sub_col1, sub_col2 = st.columns(2)
                 with sub_col1:
                     std_uph = st.number_input("4. Standard UPH", min_value=1, value=1000, step=100)
@@ -1314,38 +1311,56 @@ with main_tabs[2]:
             out_label = "Out GAP (Below Target)" if is_out_error else "Out GAP"
             out_val = f"+{output_gap:,.0f}" if output_gap > 0 else f"{output_gap:,.0f}"
 
-            # 🔥 提取 Retest Rate (重工率)
+            # 🔥 提取 Retest Rate (重工率) - 小數點兩位
             rework_rate = day_station_df['Rework'].iloc[0]
             is_rework_error = rework_rate > 0.25
-            rework_str = f"{rework_rate*100:.1f}"
+            rework_str = f"{rework_rate*100:.2f}"
 
             # 畫面渲染：三大塊面板
             col1, col2, col3 = st.columns(3)
             
+            # 🌟 修正 1：利用 flex 切分寬度，強制數值與單位垂直對齊
             def kpi_row(label, value, unit, val_color, is_last=False):
                 border_style = "none" if is_last else "1px solid rgba(0,0,0,0.06)"
                 padding_btm = "0" if is_last else "10px"
                 margin_btm = "0" if is_last else "10px"
-                return f"<div style='display: flex; justify-content: space-between; align-items: baseline; border-bottom: {border_style}; padding-bottom: {padding_btm}; margin-bottom: {margin_btm};'><span style='font-size: 12px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;'>{label}</span><span style='font-size: 22px; color: {val_color}; font-weight: 800; line-height: 1;'>{value} <span style='font-size: 12px; color: #94a3b8; font-weight: 600;'>{unit}</span></span></div>"
+                return f"""
+                <div style='display: flex; align-items: baseline; border-bottom: {border_style}; padding-bottom: {padding_btm}; margin-bottom: {margin_btm};'>
+                    <div style='flex: 1; font-size: 12px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;'>{label}</div>
+                    <div style='width: 90px; text-align: right; font-size: 22px; color: {val_color}; font-weight: 800; line-height: 1;'>{value}</div>
+                    <div style='width: 30px; text-align: left; padding-left: 8px; font-size: 12px; color: #94a3b8; font-weight: 600;'>{unit}</div>
+                </div>
+                """
             
             with col1:
                 st.markdown("**🎯 Internal Target**")
-                html_col1 = f"<div style='background-color: #f0f9ff; padding: 18px 20px; border-radius: 8px; border: 1px solid #bae6fd; display: flex; flex-direction: column; justify-content: space-between; height: 100%; min-height: 270px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>{kpi_row('MAX', f'{ie_max_upd:,.0f}', 'ea', '#0369a1')}{kpi_row(speed_label, ie_speed_str, speed_unit, '#0369a1')}{kpi_row('OEE', f'{ie_oee:.1f}', '%', '#0369a1')}{kpi_row('Target', f'{ie_target_upd:,.0f}', 'ea', '#0284c7', is_last=True)}</div>"
+                html_col1 = f"<div style='background-color: #f0f9ff; padding: 18px 20px; border-radius: 8px; border: 1px solid #bae6fd; display: flex; flex-direction: column; justify-content: space-between; height: 100%; min-height: 270px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>{kpi_row('MAX', f'{ie_max_upd:,.0f}', 'ea', '#0369a1')}{kpi_row(speed_label, ie_speed_str, speed_unit, '#0369a1')}{kpi_row('OEE', f'{ie_oee:.2f}', '%', '#0369a1')}{kpi_row('Target', f'{ie_target_upd:,.0f}', 'ea', '#0284c7', is_last=True)}</div>"
                 st.markdown(html_col1, unsafe_allow_html=True)
                 
             with col2:
                 st.markdown("**🏭 OSAT Implied Baseline**")
-                html_col2 = f"<div style='background-color: #fffbeb; padding: 18px 20px; border-radius: 8px; border: 1px solid #fde68a; display: flex; flex-direction: column; justify-content: space-between; height: 100%; min-height: 270px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>{kpi_row('MAX', f'{osat_implied_max:,.0f}', 'ea', '#b45309')}{kpi_row(f'Implied {speed_label}', osat_speed_str, speed_unit, '#b45309')}{kpi_row('OEE', f'{osat_avg_oee:.1f}', '%', '#b45309')}{kpi_row('Actual', f'{osat_actual_upd:,.0f}', 'ea', '#d97706', is_last=True)}</div>"
+                html_col2 = f"<div style='background-color: #fffbeb; padding: 18px 20px; border-radius: 8px; border: 1px solid #fde68a; display: flex; flex-direction: column; justify-content: space-between; height: 100%; min-height: 270px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>{kpi_row('MAX', f'{osat_implied_max:,.0f}', 'ea', '#b45309')}{kpi_row(f'Implied {speed_label}', osat_speed_str, speed_unit, '#b45309')}{kpi_row('OEE', f'{osat_avg_oee:.2f}', '%', '#b45309')}{kpi_row('Actual', f'{osat_actual_upd:,.0f}', 'ea', '#d97706', is_last=True)}</div>"
                 st.markdown(html_col2, unsafe_allow_html=True)
                 
             with col3:
                 st.markdown("**📊 Variance & Risk Analysis**")
+                
+                # 🌟 修正 1：同樣在 alert_box 利用 flex 確保齊整
                 def alert_box(label, value, unit, is_error, is_last=False):
                     bg = "#fef2f2" if is_error else "#f0fdf4"
                     border = "#fecaca" if is_error else "#bbf7d0"
                     text = "#991b1b" if is_error else "#166534"
                     margin_btm = "0" if is_last else "14px"
-                    return f"<div style='background-color: {bg}; padding: 0 18px; border-radius: 8px; border: 1px solid {border}; display: flex; flex-direction: column; justify-content: center; height: 80px; box-sizing: border-box; margin-bottom: {margin_btm}; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'><div style='font-size: 11px; color: {text}; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; opacity: 0.8; letter-spacing: 0.5px;'>{label}</div><div style='display: flex; justify-content: space-between; align-items: center;'><div><span style='font-size: 24px; color: {text}; font-weight: 800; line-height: 1;'>{value}</span> <span style='font-size: 13px; font-weight: 600;'>{unit}</span></div></div></div>"
+                    return f"""
+                    <div style='background-color: {bg}; padding: 0 18px; border-radius: 8px; border: 1px solid {border}; display: flex; flex-direction: column; justify-content: center; height: 80px; box-sizing: border-box; margin-bottom: {margin_btm}; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>
+                        <div style='font-size: 11px; color: {text}; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; opacity: 0.8; letter-spacing: 0.5px;'>{label}</div>
+                        <div style='display: flex; align-items: baseline;'>
+                            <div style='flex: 1;'></div>
+                            <div style='width: 100px; text-align: right; font-size: 24px; color: {text}; font-weight: 800; line-height: 1;'>{value}</div>
+                            <div style='width: 30px; text-align: left; padding-left: 8px; font-size: 13px; font-weight: 600; color: {text};'>{unit}</div>
+                        </div>
+                    </div>
+                    """
                 
                 html_col3 = f"<div style='display: flex; flex-direction: column; height: 100%; min-height: 270px; box-sizing: border-box;'>{alert_box(speed_gap_label, speed_gap_str, speed_unit, is_speed_error)}{alert_box(out_label, out_val, 'ea', is_out_error)}{alert_box('Retest Rate (Risk)', rework_str, '%', is_rework_error, is_last=True)}</div>"
                 st.markdown(html_col3, unsafe_allow_html=True)
@@ -1355,12 +1370,13 @@ with main_tabs[2]:
         # ==========================================
         # 🗂️ 【Layer 1.5：站點層級 Raw Data】
         # ==========================================
-        with st.expander(f"🗂️ View Station Level Raw Data ({selected_osat_op})", expanded=False):
-            st.markdown("#### 📋 Station Level Raw Data")
-            
-            # 🌟 修正 2: 將 Toggle 與 Caption 排在同一行 (左邊開關，右邊文字)
-            col_tog, col_cap = st.columns([1.2, 4])
-            with col_tog:
+        # 🌟 預設展開
+        with st.expander(f"🗂️ View Station Level Raw Data ({selected_osat_op})", expanded=True):
+            col_rtitle, col_rtoggle, col_cap = st.columns([1.5, 1, 3])
+            with col_rtitle:
+                st.markdown("#### 📋 Station Level Raw Data")
+            with col_rtoggle:
+                st.markdown("<div style='padding-top: 5px;'></div>", unsafe_allow_html=True)
                 apply_date_filter = st.toggle(f"Filter by ({selected_date})", value=True)
             with col_cap:
                 if apply_date_filter:
@@ -1368,13 +1384,11 @@ with main_tabs[2]:
                 else:
                     st.markdown(f"<div style='padding-top: 10px; font-size: 14px; color: #64748b;'>Showing historical reporting data for <b>{selected_osat_op}</b> across all available dates.</div>", unsafe_allow_html=True)
             
-            # 根據開關決定要抓單日還是全歷史資料
             if apply_date_filter:
                 display_station_df = df_station_all[(df_station_all['站點'] == selected_osat_op) & (df_station_all['日期'] == selected_date)].copy()
             else:
                 display_station_df = df_station_all[df_station_all['站點'] == selected_osat_op].copy()
                 
-            # 按日期降冪排列 (方便看趨勢)
             display_station_df = display_station_df.sort_values('日期', ascending=False)
             
             col_configs = {
@@ -1405,7 +1419,6 @@ with main_tabs[2]:
 
         st.markdown("---")
 
-        # 篩選出當日對應 Equipment Group 下所有的機台 (Raw Data)
         rca_machine_df = df_machine_all[df_machine_all['日期'] == selected_date].copy()
         
         # ==========================================
@@ -1416,13 +1429,13 @@ with main_tabs[2]:
         
         col_rw, col_dn, col_id = st.columns(3)
 
-        # 排行榜產生器：過濾 > 0，避免無辜者上榜
+        # 排行榜產生器：百分比精確到小數點後 2 位
         def make_top3_df(df, metric):
             offenders = df[df[metric] > 0]
             top3 = offenders[['機台代號', '正測顆數', metric]].sort_values(by=metric, ascending=False).head(3)
             
             if not top3.empty:
-                top3[metric] = top3[metric].apply(lambda x: f"{x*100:.1f}%")
+                top3[metric] = top3[metric].apply(lambda x: f"{x*100:.2f}%")
                 
             return top3.rename(columns={'機台代號': 'Tester ID', '正測顆數': 'Total Qty', metric: f'{metric} %'})
 
@@ -1436,31 +1449,20 @@ with main_tabs[2]:
             st.markdown("**💤 Top Idle**")
             st.dataframe(make_top3_df(rca_machine_df, 'Idle'), use_container_width=True, hide_index=True)
 
-        st.markdown("---")
-
-        # ==========================================
-        # 📈 【第三層：單機 1440 分鐘還原圖】
-        # ==========================================
-        if not rca_machine_df.empty:
-            render_rca_drilldown(rca_machine_df)
-        else:
-            st.info(f"No specific machine data logged for {selected_cat} on {selected_date}.")
-
         st.write("")
-        st.write("")
-
+        
         # ==========================================
-        # 🗂️ 【第四層：OSAT 呈堂證供 (Raw Data)】
+        # 🗂️ 【Layer 2.5：OSAT 單機呈堂證供 (Raw Data)】
         # ==========================================
-        with st.expander("🗂️ Layer 4: Full Machine Level Raw Data (Evidence)", expanded=False):
+        # 🌟 移動到此處，並設為預設展開
+        with st.expander("🗂️ View Machine Level Raw Data (Evidence)", expanded=True):
             st.markdown("#### 📋 Machine Level Raw Data")
-            st.caption("Screenshot this raw data for OSAT auditing. (Auto-sorted by culprits)")
+            st.caption("Screenshot this raw data for OSAT auditing. (Sorted by Tester ID)")
             
             if not rca_machine_df.empty:
-                # 1. 自動排序：把當天 Down 和 Rework 最高的機台排在前面
-                rca_machine_df = rca_machine_df.sort_values(by=['Down', 'Rework'], ascending=[False, False])
+                # 🌟 修正：按機台代號從小到大排序
+                rca_machine_df = rca_machine_df.sort_values(by=['機台代號'], ascending=True)
                 
-                # 2. 自動抓鬼高亮與格式化 (Pandas Styler)
                 pct_cols_list = [
                     'E%', 'E_DO1%', 'DutOff%', '重工效率', '總產出效率', 
                     'Run', 'Rework', 'SetUp', 'Down', 'Idle', 'PM', 'Other', 'OEE',
@@ -1468,10 +1470,9 @@ with main_tabs[2]:
                 ]
                 valid_pct_cols = [c for c in rca_machine_df.columns if c in pct_cols_list]
                 
-                # 定義小數點兩位的格式
+                # 百分比小數點兩位格式化
                 format_dict = {col: "{:.2%}" for col in valid_pct_cols}
                 
-                # 定義高亮邏輯函數
                 def highlight_red(val):
                     if isinstance(val, (int, float)) and val > 0.05:
                         return 'background-color: #fee2e2; color: #991b1b; font-weight: bold;'
@@ -1484,7 +1485,6 @@ with main_tabs[2]:
                 
                 styled_raw_df = rca_machine_df.style.format(format_dict)
                 
-                # 相容較新與舊版 Pandas API 的寫法
                 if hasattr(styled_raw_df, "map"):
                     styled_raw_df = styled_raw_df.map(highlight_red, subset=['Down', 'Rework']) \
                                                  .map(highlight_orange, subset=['Idle'])
@@ -1492,10 +1492,19 @@ with main_tabs[2]:
                     styled_raw_df = styled_raw_df.applymap(highlight_red, subset=['Down', 'Rework']) \
                                                  .applymap(highlight_orange, subset=['Idle'])
                 
-                # 滿版顯示加上高亮特效的原始表
                 st.dataframe(styled_raw_df, use_container_width=True, hide_index=True)
             else:
                 st.info("No detailed machine data available to display.")
+
+        st.markdown("---")
+
+        # ==========================================
+        # 📈 【第三層：單機 1440 分鐘還原圖】
+        # ==========================================
+        if not rca_machine_df.empty:
+            render_rca_drilldown(rca_machine_df)
+        else:
+            st.info(f"No specific machine data logged for {selected_cat} on {selected_date}.")
 
 # ==============================================================================
 # --- 📊 返回 Tab 1 剩餘執行區段 (含 st.stop 防呆) ---
