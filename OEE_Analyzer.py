@@ -1306,10 +1306,10 @@ with main_tabs[2]:
             out_label = "Out GAP (Below Target)" if is_out_error else "Out GAP"
             out_val = f"+{output_gap:,.0f}" if output_gap > 0 else f"{output_gap:,.0f}"
 
-            # 🔥 提取 Retest Rate (重工率)
+            # 🔥 提取 Retest Rate (重工率) - 修正為 25% (0.25) 標準與避免雙重 %%
             rework_rate = day_station_df['Rework'].iloc[0]
-            is_rework_error = rework_rate > 0.05
-            rework_str = f"{rework_rate*100:.1f}%"
+            is_rework_error = rework_rate > 0.25
+            rework_str = f"{rework_rate*100:.1f}"
 
             # 畫面渲染：三大塊面板
             col1, col2, col3 = st.columns(3)
@@ -1357,20 +1357,26 @@ with main_tabs[2]:
         
         col_rw, col_dn, col_id = st.columns(3)
 
-        # 排行榜產生器
+        # 🛡️ 修正排行榜產生器：過濾 > 0，避免無辜者上榜
         def make_top3_df(df, metric):
-            top3 = df[['機台代號', '正測顆數', metric]].sort_values(by=metric, ascending=False).head(3)
-            top3[metric] = top3[metric].apply(lambda x: f"{x*100:.1f}%")
+            # 只取真正有發生異常 (大於 0%) 的機台，避免硬湊 3 台
+            offenders = df[df[metric] > 0]
+            top3 = offenders[['機台代號', '正測顆數', metric]].sort_values(by=metric, ascending=False).head(3)
+            
+            if not top3.empty:
+                top3[metric] = top3[metric].apply(lambda x: f"{x*100:.1f}%")
+                
             return top3.rename(columns={'機台代號': 'Tester ID', '正測顆數': 'Total Qty', metric: f'{metric} %'})
 
+        # 全英文介面修改
         with col_rw:
-            st.markdown("**💥 Top Rework (重測王)**")
+            st.markdown("**💥 Top Rework**")
             st.dataframe(make_top3_df(rca_machine_df, 'Rework'), use_container_width=True, hide_index=True)
         with col_dn:
-            st.markdown("**🛑 Top Down (當機王)**")
+            st.markdown("**🛑 Top Down**")
             st.dataframe(make_top3_df(rca_machine_df, 'Down'), use_container_width=True, hide_index=True)
         with col_id:
-            st.markdown("**💤 Top Idle (閒置王)**")
+            st.markdown("**💤 Top Idle**")
             st.dataframe(make_top3_df(rca_machine_df, 'Idle'), use_container_width=True, hide_index=True)
 
         st.markdown("---")
@@ -1378,7 +1384,6 @@ with main_tabs[2]:
         # ==========================================
         # 📈 【第三層：單機 1440 分鐘還原圖】
         # ==========================================
-        # 直接霸氣展開，不再隱藏於折疊中。讓排行榜跟圖表視線無縫接軌！
         if not rca_machine_df.empty:
             render_rca_drilldown(rca_machine_df)
         else:
