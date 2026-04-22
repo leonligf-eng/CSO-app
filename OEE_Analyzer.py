@@ -1306,7 +1306,7 @@ with main_tabs[2]:
             out_label = "Out GAP (Below Target)" if is_out_error else "Out GAP"
             out_val = f"+{output_gap:,.0f}" if output_gap > 0 else f"{output_gap:,.0f}"
 
-            # 🔥 提取 Retest Rate (重工率) - 修正為 25% (0.25) 標準與避免雙重 %%
+            # 🔥 提取 Retest Rate (重工率) - 25% 標準
             rework_rate = day_station_df['Rework'].iloc[0]
             is_rework_error = rework_rate > 0.25
             rework_str = f"{rework_rate*100:.1f}"
@@ -1339,11 +1339,48 @@ with main_tabs[2]:
                     margin_btm = "0" if is_last else "14px"
                     return f"<div style='background-color: {bg}; padding: 0 18px; border-radius: 8px; border: 1px solid {border}; display: flex; flex-direction: column; justify-content: center; height: 80px; box-sizing: border-box; margin-bottom: {margin_btm}; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'><div style='font-size: 11px; color: {text}; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; opacity: 0.8; letter-spacing: 0.5px;'>{label}</div><div style='display: flex; justify-content: space-between; align-items: center;'><div><span style='font-size: 24px; color: {text}; font-weight: 800; line-height: 1;'>{value}</span> <span style='font-size: 13px; font-weight: 600;'>{unit}</span></div></div></div>"
                 
-                # 放入三個 Alert Box (含新加碼的 Retest Rate)
                 html_col3 = f"<div style='display: flex; flex-direction: column; height: 100%; min-height: 270px; box-sizing: border-box;'>{alert_box(speed_gap_label, speed_gap_str, speed_unit, is_speed_error)}{alert_box(out_label, out_val, 'ea', is_out_error)}{alert_box('Retest Rate (Risk)', rework_str, '%', is_rework_error, is_last=True)}</div>"
                 st.markdown(html_col3, unsafe_allow_html=True)
 
         st.write("")
+        
+        # ==========================================
+        # 🗂️ 【Layer 1.5：站點層級 Raw Data】(新增需求)
+        # ==========================================
+        with st.expander(f"🗂️ View Station Level Raw Data ({selected_osat_op})", expanded=False):
+            st.markdown("#### 📋 Station Level Raw Data")
+            st.caption(f"Historical reporting data for {selected_osat_op} across all available dates.")
+            
+            # 抓取該站點「所有日期」的資料，並按日期降冪排列 (方便看趨勢)
+            display_station_df = df_station_all[df_station_all['站點'] == selected_osat_op].copy()
+            display_station_df = display_station_df.sort_values('日期', ascending=False)
+            
+            col_configs = {
+                "日期": st.column_config.DateColumn("Date", format="YYYY-MM-DD")
+            }
+            
+            pct_cols_list = [
+                'E%', 'E_DO1%', 'DutOff%', '重工效率', '總產出效率', 
+                'Run', 'Rework', 'SetUp', 'Down', 'Idle', 'PM', 'Other', 'OEE',
+                'Clean', 'Corr', 'EQC', 'E1', 'E2'
+            ]
+            
+            for col in display_station_df.columns:
+                if col in pct_cols_list:
+                    display_station_df[col] = display_station_df[col] * 100 
+                    col_configs[col] = st.column_config.NumberColumn(col, format="%.2f %%")
+                elif col in ['開機數']:
+                    col_configs[col] = st.column_config.NumberColumn(col, format="%.2f")
+                elif col in ['正測顆數', '測試顆數', '產出良品數', '生產時間']:
+                    col_configs[col] = st.column_config.NumberColumn(col, format="%d")
+                    
+            st.dataframe(
+                display_station_df, 
+                use_container_width=True, 
+                hide_index=True, 
+                column_config=col_configs
+            )
+
         st.markdown("---")
 
         # 篩選出當日對應 Equipment Group 下所有的機台 (Raw Data)
@@ -1368,7 +1405,6 @@ with main_tabs[2]:
                 
             return top3.rename(columns={'機台代號': 'Tester ID', '正測顆數': 'Total Qty', metric: f'{metric} %'})
 
-        # 全英文介面修改
         with col_rw:
             st.markdown("**💥 Top Rework**")
             st.dataframe(make_top3_df(rca_machine_df, 'Rework'), use_container_width=True, hide_index=True)
