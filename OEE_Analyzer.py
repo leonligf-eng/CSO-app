@@ -1655,6 +1655,14 @@ with main_tabs[0]:
             
             avg_step_yield = (total_pass_insertions / total_insertions) * 100 if total_insertions > 0 else 0
             active_testers = op_summary['Tester'].nunique()
+            
+            # 🌟 新增：計算總批次數 (Lot Count)
+            total_lots = op_df['LotNo'].nunique()
+            
+            # 🌟 新增：計算加權平均 Availability (A)
+            total_active_days = op_summary['Active_Days'].sum()
+            total_span_days = op_summary['Adjusted_Span_Days'].sum()
+            global_availability = (total_active_days / total_span_days) * 100 if total_span_days > 0 else 0
 
             c1, c2, c3, c4 = st.columns(4)
             with c1: 
@@ -1662,11 +1670,14 @@ with main_tabs[0]:
                     <div class='kpi-card'>
                         <div class='kpi-title'>Test Qty</div>
                         <div class='kpi-value'>{total_insertions:,}</div>
+                        <div class='kpi-sub-container'>
+                            <span class='kpi-sub-title'>↳ Lots:</span>
+                            <span class='kpi-sub-value'>{total_lots:,}</span>
+                        </div>
                     </div>
                 """, unsafe_allow_html=True)
                 
             with c2: 
-                # 🌟 內嵌次級指標：First Pass Qty
                 st.markdown(f"""
                     <div class='kpi-card'>
                         <div class='kpi-title'>Pass Qty</div>
@@ -1679,7 +1690,6 @@ with main_tabs[0]:
                 """, unsafe_allow_html=True)
                 
             with c3: 
-                # 🌟 內嵌次級指標：First Pass Yield (FPY)
                 st.markdown(f"""
                     <div class='kpi-card'>
                         <div class='kpi-title'>Avg Final Yield</div>
@@ -1696,6 +1706,10 @@ with main_tabs[0]:
                     <div class='kpi-card'>
                         <div class='kpi-title'>Active Testers</div>
                         <div class='kpi-value'>{active_testers}</div>
+                        <div class='kpi-sub-container'>
+                            <span class='kpi-sub-title'>↳ Avg Avail:</span>
+                            <span class='kpi-sub-value'>{global_availability:.1f}%</span>
+                        </div>
                     </div>
                 """, unsafe_allow_html=True)
 
