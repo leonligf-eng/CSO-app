@@ -18,6 +18,12 @@ st.markdown("""
     .kpi-card { background-color: #ffffff; border: 1px solid #e0e0e0; padding: 20px; border-radius: 8px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05); text-align: center; margin-bottom: 25px; }
     .kpi-title { color: #6c757d; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;}
     .kpi-value { color: #1E3A8A; font-size: 32px; font-weight: bold; margin-top: 10px; }
+    
+    /* 🌟 新增：用於卡片內嵌次級指標的 CSS */
+    .kpi-sub-container { margin-top: 8px; border-top: 1px dashed #f0f0f0; padding-top: 8px; }
+    .kpi-sub-title { color: #94a3b8; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .kpi-sub-value { color: #64748b; font-size: 14px; font-weight: 700; margin-left: 4px; }
+    
     .summary-card { background-color: #f8f9fa; border-left: 5px solid #28a745; padding: 15px 20px; border-radius: 6px; box-shadow: 1px 1px 4px rgba(0,0,0,0.04); text-align: left; margin-bottom: 20px; }
     .summary-title { color: #6c757d; font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;}
     .summary-value { color: #28a745; font-size: 26px; font-weight: bold; margin-top: 5px; }
@@ -1642,14 +1648,56 @@ with main_tabs[0]:
             
             total_insertions = int(op_summary['Total_TestQty'].sum())
             total_pass_insertions = int(op_summary['Total_PassQty'].sum())
+            
+            # 🌟 新增：計算 First Pass 的全域數值
+            total_first_pass_insertions = int(op_summary['Total_FirstPassQty'].sum())
+            avg_first_pass_yield = (total_first_pass_insertions / total_insertions) * 100 if total_insertions > 0 else 0
+            
             avg_step_yield = (total_pass_insertions / total_insertions) * 100 if total_insertions > 0 else 0
             active_testers = op_summary['Tester'].nunique()
 
             c1, c2, c3, c4 = st.columns(4)
-            with c1: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Test Qty</div><div class='kpi-value'>{total_insertions:,}</div></div>", unsafe_allow_html=True)
-            with c2: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Pass Qty</div><div class='kpi-value'>{total_pass_insertions:,}</div></div>", unsafe_allow_html=True)
-            with c3: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Avg Final Yield</div><div class='kpi-value'>{avg_step_yield:.2f}%</div></div>", unsafe_allow_html=True)
-            with c4: st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Active Testers</div><div class='kpi-value'>{active_testers}</div></div>", unsafe_allow_html=True)
+            with c1: 
+                st.markdown(f"""
+                    <div class='kpi-card'>
+                        <div class='kpi-title'>Test Qty</div>
+                        <div class='kpi-value'>{total_insertions:,}</div>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+            with c2: 
+                # 🌟 內嵌次級指標：First Pass Qty
+                st.markdown(f"""
+                    <div class='kpi-card'>
+                        <div class='kpi-title'>Pass Qty</div>
+                        <div class='kpi-value'>{total_pass_insertions:,}</div>
+                        <div class='kpi-sub-container'>
+                            <span class='kpi-sub-title'>↳ First Pass:</span>
+                            <span class='kpi-sub-value'>{total_first_pass_insertions:,}</span>
+                        </div>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+            with c3: 
+                # 🌟 內嵌次級指標：First Pass Yield (FPY)
+                st.markdown(f"""
+                    <div class='kpi-card'>
+                        <div class='kpi-title'>Avg Final Yield</div>
+                        <div class='kpi-value'>{avg_step_yield:.2f}%</div>
+                        <div class='kpi-sub-container'>
+                            <span class='kpi-sub-title'>↳ First Yield:</span>
+                            <span class='kpi-sub-value'>{avg_first_pass_yield:.2f}%</span>
+                        </div>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+            with c4: 
+                st.markdown(f"""
+                    <div class='kpi-card'>
+                        <div class='kpi-title'>Active Testers</div>
+                        <div class='kpi-value'>{active_testers}</div>
+                    </div>
+                """, unsafe_allow_html=True)
 
             st.divider()
 
