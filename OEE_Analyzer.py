@@ -1449,19 +1449,37 @@ with main_tabs[2]:
                 ]
                 valid_pct_cols = [c for c in rca_machine_df.columns if c in pct_cols_list]
                 
-                # 1. 百分比小數點兩位格式化
-                format_dict = {col: "{:.2%}" for col in valid_pct_cols}
+                # 🌟 修復 ValueError：使用安全防護函數取代字串格式化，避免 NaN 或文字導致崩潰
+                def safe_pct(x):
+                    try:
+                        return f"{float(x):.2%}" if pd.notnull(x) else "-"
+                    except:
+                        return str(x)
+                        
+                def safe_int(x):
+                    try:
+                        return f"{float(x):,.0f}" if pd.notnull(x) else "-"
+                    except:
+                        return str(x)
+                        
+                def safe_float(x):
+                    try:
+                        return f"{float(x):.2f}" if pd.notnull(x) else "-"
+                    except:
+                        return str(x)
                 
-                # 🌟 修復：把顆數與時間強制格式化為整數 (並加上千分位逗號)
+                # 套用安全函數
+                format_dict = {col: safe_pct for col in valid_pct_cols}
+                
                 int_cols = ['正測顆數', '測試顆數', '產出良品數', '生產時間']
                 for col in int_cols:
                     if col in rca_machine_df.columns:
-                        format_dict[col] = "{:,.0f}"
+                        format_dict[col] = safe_int
                         
-                # 🌟 修復：開機數保留兩位小數
                 if '開機數' in rca_machine_df.columns:
-                    format_dict['開機數'] = "{:.2f}"
+                    format_dict['開機數'] = safe_float
                 
+                # 高亮標記函數
                 def highlight_red(val):
                     if isinstance(val, (int, float)) and val > 0.05:
                         return 'background-color: #fee2e2; color: #991b1b; font-weight: bold;'
@@ -1472,6 +1490,7 @@ with main_tabs[2]:
                         return 'background-color: #ffedd5; color: #9a3412; font-weight: bold;'
                     return ''
                 
+                # 渲染 Styler
                 styled_raw_df = rca_machine_df.style.format(format_dict)
                 
                 if hasattr(styled_raw_df, "map"):
