@@ -1129,7 +1129,10 @@ with main_tabs[0]:
     st.sidebar.header("🧮 Capacity Calculator")
     with st.sidebar.expander("Detailed Parameters", expanded=False):
         calc_lot_size = st.number_input("Lot Size", value=6600, step=100)
-        calc_site = st.selectbox("Site", options=[1, 2, 4, 8, 16, 32, 64, 128, 256], index=3)
+        
+        # 🌟 修正 1: Site Count 改為 1~16，預設為 8 (index 7)
+        calc_site = st.selectbox("Site", options=list(range(1, 17)), index=7)
+        
         calc_test_time = st.number_input("Test Time (s)", value=150.00, step=1.00, format="%.2f")
         calc_fpy = st.number_input("FPY %", value=95.00, step=1.00, format="%.2f")
         calc_oee = st.number_input("OEE %", value=70.00, step=1.00, format="%.2f")
@@ -1210,7 +1213,9 @@ with main_tabs[2]:
         
         # 🔍 【頂部控制區】
         st.markdown("#### 🔍 Filter & Settings")
-        col_cat, col_st, col_date = st.columns(3)
+        
+        # 🌟 修正 2: 將 Config 移上來，與 Date 排在同一列 (四個 Column)
+        col_cat, col_st, col_date, col_cfg = st.columns([1, 1, 1.2, 1.5])
         
         with col_cat:
             selected_cat = st.selectbox("1. Equipment Group", options=list(active_categories.keys()))
@@ -1231,35 +1236,30 @@ with main_tabs[2]:
                 st.warning("No dates available for this station.")
                 st.stop()
 
-        # ⚙️ 將設定參數區收納於此，保持畫面簡潔
-        with st.expander("⚙️ Target & Speed Configuration (Auto-Linked to Global)", expanded=False):
-            col_uph, col_oee = st.columns(2)
-            is_ate_track = selected_cat == "ATE"
-            
-            if is_ate_track:
-                with col_uph:
-                    st.markdown("<div style='padding-top: 10px; font-size: 13px; color: #64748b;'>🔗 Linked to Global Calc</div>", unsafe_allow_html=True)
-                with col_oee:
-                    st.markdown(f"<div style='padding-top: 10px; font-size: 13px; color: #0369a1; font-weight: 700;'>TT: {calc_test_time}s | Site: {calc_site}</div>", unsafe_allow_html=True)
-                    
-                ie_max_upd = (86400 / calc_test_time) * int(calc_site) if calc_test_time > 0 else 0
-                ie_target_upd = single_cap
-                ie_oee = calc_oee
-                speed_label = "TT"
-                speed_unit = "s"
-                ie_speed_val = calc_test_time
-            else:
-                with col_uph:
+        with col_cfg:
+            with st.expander("⚙️ Target & Speed Config", expanded=False):
+                is_ate_track = selected_cat == "ATE"
+                
+                if is_ate_track:
+                    st.markdown("<div style='padding-top: 4px; font-size: 13px; color: #64748b;'>🔗 Linked to Global Calc</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size: 14px; color: #0369a1; font-weight: 700;'>TT: {calc_test_time}s | Site: {calc_site}</div>", unsafe_allow_html=True)
+                        
+                    ie_max_upd = (86400 / calc_test_time) * int(calc_site) if calc_test_time > 0 else 0
+                    ie_target_upd = single_cap
+                    ie_oee = calc_oee
+                    speed_label = "TT"
+                    speed_unit = "s"
+                    ie_speed_val = calc_test_time
+                else:
                     std_uph = st.number_input("Standard UPH", min_value=1, value=1000, step=100)
-                with col_oee:
                     local_target_oee = st.number_input("Target OEE %", min_value=0.0, max_value=100.0, value=85.0, step=1.0)
-                    
-                ie_max_upd = std_uph * 24
-                ie_target_upd = ie_max_upd * (local_target_oee / 100.0)
-                ie_oee = local_target_oee
-                speed_label = "UPH"
-                speed_unit = "ea/hr"
-                ie_speed_val = std_uph
+                        
+                    ie_max_upd = std_uph * 24
+                    ie_target_upd = ie_max_upd * (local_target_oee / 100.0)
+                    ie_oee = local_target_oee
+                    speed_label = "UPH"
+                    speed_unit = "ea/hr"
+                    ie_speed_val = std_uph
 
         st.divider()
 
@@ -1345,13 +1345,16 @@ with main_tabs[2]:
         st.write("")
         
         # ==========================================
-        # 🗂️ 【Layer 1.5：站點層級 Raw Data】(新增需求)
+        # 🗂️ 【Layer 1.5：站點層級 Raw Data】
         # ==========================================
         with st.expander(f"🗂️ View Station Level Raw Data ({selected_osat_op})", expanded=False):
-            st.markdown("#### 📋 Station Level Raw Data")
-            
-            # 🌟 新增：Date Filter 連動開關 (預設開啟)
-            apply_date_filter = st.toggle(f"Filter by Selected Date ({selected_date})", value=True)
+            # 🌟 修正 3: 將標題與 Toggle 水平對齊並排
+            col_rtitle, col_rtoggle = st.columns([3, 1.2])
+            with col_rtitle:
+                st.markdown("#### 📋 Station Level Raw Data")
+            with col_rtoggle:
+                st.markdown("<div style='padding-top: 5px;'></div>", unsafe_allow_html=True)
+                apply_date_filter = st.toggle(f"Filter by ({selected_date})", value=True)
             
             # 根據開關決定要抓單日還是全歷史資料
             if apply_date_filter:
@@ -1380,7 +1383,7 @@ with main_tabs[2]:
                     col_configs[col] = st.column_config.NumberColumn(col, format="%.2f %%")
                 elif col in ['開機數']:
                     col_configs[col] = st.column_config.NumberColumn(col, format="%.2f")
-                elif col in ['正測顆數', '測試顆數', '產出良品數', '生產時間', 'Expected_Output', 'Max_Possible_Output']:
+                elif col in ['正測顆數', '測試顆數', '產出良品數', '生產時間']:
                     col_configs[col] = st.column_config.NumberColumn(col, format="%d")
                     
             st.dataframe(
@@ -1403,9 +1406,8 @@ with main_tabs[2]:
         
         col_rw, col_dn, col_id = st.columns(3)
 
-        # 🛡️ 修正排行榜產生器：過濾 > 0，避免無辜者上榜
+        # 排行榜產生器：過濾 > 0，避免無辜者上榜
         def make_top3_df(df, metric):
-            # 只取真正有發生異常 (大於 0%) 的機台，避免硬湊 3 台
             offenders = df[df[metric] > 0]
             top3 = offenders[['機台代號', '正測顆數', metric]].sort_values(by=metric, ascending=False).head(3)
             
