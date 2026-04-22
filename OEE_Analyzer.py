@@ -303,7 +303,6 @@ def clean_percentage(val):
 @st.cache_data
 def load_osat_data(file_bytes):
     try:
-        # 💡 關鍵修復：將純 bytes 包裝成 pandas 喜歡的 file-like object
         file_obj = io.BytesIO(file_bytes) 
         xls = pd.ExcelFile(file_obj)
         
@@ -314,11 +313,22 @@ def load_osat_data(file_bytes):
             if sheet.startswith("Daily XOEE of"):
                 process_group = sheet.replace("Daily XOEE of", "").strip()
                 if process_group in sheet_names:
+                    # ==========================================
+                    # 🏭 處理 Station 站點總表
+                    # ==========================================
                     df_station = pd.read_excel(xls, sheet_name=sheet)
-                    df_station['日期'] = pd.to_datetime(df_station['日期']).dt.date
+                    
+                    # 🛡️ 防呆 1：過濾底部手寫備註 (必須有站點和日期才算有效資料)
+                    if '站點' in df_station.columns and '日期' in df_station.columns:
+                        df_station = df_station.dropna(subset=['站點', '日期'])
+                    
+                    # 🛡️ 防呆 2：強制時間轉換，若有人在日期欄位寫字會變 NaT，接著過濾掉 NaT
+                    df_station['日期'] = pd.to_datetime(df_station['日期'], errors='coerce')
+                    df_station = df_station.dropna(subset=['日期'])
+                    df_station['日期'] = df_station['日期'].dt.date
+                    
                     df_station = df_station.rename(columns={'OEE%': 'OEE'})
                     
-                    # 🌟 BUG FIX: 補齊所有可能的狀態欄位，確保 Clean/Corr/E1 等字串被正確轉換為浮點數
                     pct_cols = [
                         'E%', 'E_DO1%', 'DutOff%', '重工效率', '總產出效率', 
                         'Run', 'Rework', 'SetUp', 'Down', 'Idle', 'PM', 'Other', 'OEE',
@@ -326,14 +336,28 @@ def load_osat_data(file_bytes):
                     ]
                     
                     for col in pct_cols:
-                        if col in df_station.columns: df_station[col] = df_station[col].apply(clean_percentage)
+                        if col in df_station.columns: 
+                            df_station[col] = df_station[col].apply(clean_percentage)
                             
+                    # ==========================================
+                    # 🤖 處理 Machine 單機明細表
+                    # ==========================================
                     df_machine = pd.read_excel(xls, sheet_name=process_group)
-                    df_machine['日期'] = pd.to_datetime(df_machine['日期']).dt.date
+                    
+                    # 🛡️ 防呆 3：過濾單機表底部的垃圾列 (必須有機台代號和日期)
+                    if '機台代號' in df_machine.columns and '日期' in df_machine.columns:
+                        df_machine = df_machine.dropna(subset=['機台代號', '日期'])
+                        
+                    # 🛡️ 防呆 4：單機表的時間強制轉換與過濾
+                    df_machine['日期'] = pd.to_datetime(df_machine['日期'], errors='coerce')
+                    df_machine = df_machine.dropna(subset=['日期'])
+                    df_machine['日期'] = df_machine['日期'].dt.date
+                    
                     for col in pct_cols:
-                        if col in df_machine.columns: df_machine[col] = df_machine[col].apply(clean_percentage)
+                        if col in df_machine.columns: 
+                            df_machine[col] = df_machine[col].apply(clean_percentage)
                             
-                    # 🛡️ Ironclad Defense: Remove ghost testers
+                    # 🛡️ 既有防呆 5: 移除幽靈機台 (產出0且開機數0)
                     mask_ghost = (df_machine['開機數'] == 0) & (df_machine['正測顆數'] == 0)
                     df_machine_clean = df_machine[~mask_ghost].copy()
                     
@@ -343,9 +367,9 @@ def load_osat_data(file_bytes):
                     }
         return processed_data
     except Exception as e:
-        # 🚨 保留這個錯誤捕捉機制，它太好用了！
         st.error(f"🛑 Error Parsing Excel File: {str(e)}")
         return None
+
 
 # ==============================================================================
 # --- 🌟 單機 1440 分鐘時間還原推疊圖 (加入 Context-Aware X 軸魔法) ---
