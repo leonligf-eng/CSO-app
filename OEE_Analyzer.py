@@ -1349,10 +1349,19 @@ with main_tabs[2]:
         # ==========================================
         with st.expander(f"🗂️ View Station Level Raw Data ({selected_osat_op})", expanded=False):
             st.markdown("#### 📋 Station Level Raw Data")
-            st.caption(f"Historical reporting data for {selected_osat_op} across all available dates.")
             
-            # 抓取該站點「所有日期」的資料，並按日期降冪排列 (方便看趨勢)
-            display_station_df = df_station_all[df_station_all['站點'] == selected_osat_op].copy()
+            # 🌟 新增：Date Filter 連動開關 (預設開啟)
+            apply_date_filter = st.toggle(f"Filter by Selected Date ({selected_date})", value=True)
+            
+            # 根據開關決定要抓單日還是全歷史資料
+            if apply_date_filter:
+                st.caption(f"Showing reporting data for {selected_osat_op} on {selected_date}.")
+                display_station_df = df_station_all[(df_station_all['站點'] == selected_osat_op) & (df_station_all['日期'] == selected_date)].copy()
+            else:
+                st.caption(f"Showing historical reporting data for {selected_osat_op} across all available dates.")
+                display_station_df = df_station_all[df_station_all['站點'] == selected_osat_op].copy()
+                
+            # 按日期降冪排列 (方便看趨勢)
             display_station_df = display_station_df.sort_values('日期', ascending=False)
             
             col_configs = {
@@ -1371,7 +1380,7 @@ with main_tabs[2]:
                     col_configs[col] = st.column_config.NumberColumn(col, format="%.2f %%")
                 elif col in ['開機數']:
                     col_configs[col] = st.column_config.NumberColumn(col, format="%.2f")
-                elif col in ['正測顆數', '測試顆數', '產出良品數', '生產時間']:
+                elif col in ['正測顆數', '測試顆數', '產出良品數', '生產時間', 'Expected_Output', 'Max_Possible_Output']:
                     col_configs[col] = st.column_config.NumberColumn(col, format="%d")
                     
             st.dataframe(
