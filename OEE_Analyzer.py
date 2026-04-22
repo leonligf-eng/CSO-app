@@ -1182,7 +1182,7 @@ with main_tabs[2]:
         op_to_process = {}
         all_osat_ops = []
         
-        # 定義分類字典 (對應您的需求)
+        # 定義分類字典
         category_mapping = {"ATE": [], "SLT": [], "AOI (Backend/Insp.)": []}
         
         for proc, dfs in osat_db.items():
@@ -1194,393 +1194,246 @@ with main_tabs[2]:
                     
                     # 🧠 智慧分流邏輯
                     op_upper = str(op).upper()
-                    
                     if op_upper.startswith("SLT") or op_upper.startswith("MT"):
-                        # 將 SLT, MT1, MT2 等歸類為 SLT
                         category_mapping["SLT"].append(op)
-                        
                     elif op_upper.startswith("FT") and "CHECK" not in op_upper:
-                        # 將 FT1, FTA, FT2, FT3 歸類為 ATE (完美排除 FTCHECKCORR)
                         category_mapping["ATE"].append(op)
-                        
                     else:
-                        # 剩下的 L/S, T/R, FQC, FTCHECKCORR 等歸類為 AOI (後段/檢驗)
                         category_mapping["AOI (Backend/Insp.)"].append(op)
         
-        # 濾除沒有任何站點的空分類 (避免選單出現空殼)
+        # 濾除沒有任何站點的空分類
         active_categories = {k: v for k, v in category_mapping.items() if len(v) > 0}
         
-        # 🌟 核心升級：加入「分析模式切換器」
-        st.markdown("#### 🔍 Analysis Mode")
-        analysis_mode = st.radio(
-            "Select View:", 
-            ["🎯 Station Performance (Process View)", "🛠️ Machine Health & RCA (Asset View)"], 
-            horizontal=True, 
-            label_visibility="collapsed"
-        )
-        st.write("")
+        # =========================================================
+        # 🗺️ 全新 OSAT OEE Monitor 版面藍圖 (由上到下單頁式)
+        # =========================================================
         
-        if "Station Performance" in analysis_mode:
-            # ==========================================
-            # 🟢 模式 A：站點績效模式 (Station Performance)
-            # ==========================================
-            col_cat, col_st, col_uph, col_oee = st.columns([1.6, 1.4, 1.2, 1.2])
+        # 🔍 【頂部控制區】
+        st.markdown("#### 🔍 Filter & Settings")
+        col_cat, col_st, col_date = st.columns(3)
+        
+        with col_cat:
+            selected_cat = st.selectbox("1. Equipment Group", options=list(active_categories.keys()))
+        with col_st:
+            selected_osat_op = st.selectbox("2. Target Station", options=active_categories[selected_cat])
             
-            with col_cat:
-                selected_cat = st.selectbox("1. Equipment Group", options=list(active_categories.keys()))
-            with col_st:
-                selected_osat_op = st.selectbox("2. Target Station", options=active_categories[selected_cat])
-            
-            selected_process = op_to_process[selected_osat_op]
-            op_station_df = osat_db[selected_process]['station'][osat_db[selected_process]['station']['站點'] == selected_osat_op].copy()
-            
-            if op_station_df.empty:
-                st.warning(f"No specific station data found for '{selected_osat_op}'.")
+        selected_process = op_to_process[selected_osat_op]
+        df_station_all = osat_db[selected_process]['station']
+        df_machine_all = osat_db[selected_process]['machine']
+        
+        # 取得該站點可用的所有日期，並預設為最新一天 (降冪排列)
+        available_dates = sorted(df_station_all[df_station_all['站點'] == selected_osat_op]['日期'].unique().tolist(), reverse=True)
+        
+        with col_date:
+            if available_dates:
+                selected_date = st.selectbox("3. Select Date (Auto-latest)", options=available_dates, index=0)
             else:
-                is_ate_track = selected_cat == "ATE"
-                
-                if is_ate_track:
-                    with col_uph:
-                        st.markdown("<div style='padding-top: 36px; font-size: 13px; color: #64748b;'>🔗 Linked to Global Calc</div>", unsafe_allow_html=True)
-                    with col_oee:
-                        st.markdown(f"<div style='padding-top: 36px; font-size: 13px; color: #0369a1; font-weight: 700;'>TT: {calc_test_time}s | Site: {calc_site}</div>", unsafe_allow_html=True)
-                        
-                    ie_max_upd = (86400 / calc_test_time) * int(calc_site) if calc_test_time > 0 else 0
-                    ie_target_upd = single_cap
-                    ie_oee = calc_oee
-                    speed_label = "TT"
-                    speed_unit = "s"
-                    ie_speed_val = calc_test_time
-                else:
-                    with col_uph:
-                        std_uph = st.number_input("3. Standard UPH", min_value=1, value=1000, step=100)
-                    with col_oee:
-                        local_target_oee = st.number_input("4. Target OEE %", min_value=0.0, max_value=100.0, value=85.0, step=1.0)
-                    
-                    ie_max_upd = std_uph * 24
-                    ie_target_upd = ie_max_upd * (local_target_oee / 100.0)
-                    ie_oee = local_target_oee
-                    speed_label = "UPH"
-                    speed_unit = "ea/hr"
-                    ie_speed_val = std_uph
+                st.warning("No dates available for this station.")
+                st.stop()
 
-                op_station_df['Expected_Output'] = op_station_df['開機數'] * ie_target_upd
-                op_station_df['Max_Possible_Output'] = op_station_df['開機數'] * ie_max_upd
-                op_station_df['True_OEE'] = np.where(op_station_df['Max_Possible_Output'] > 0, op_station_df['正測顆數'] / op_station_df['Max_Possible_Output'], 0)
-                
-                total_qty = op_station_df['正測顆數'].sum()
-                total_machines = op_station_df['開機數'].sum()
-                total_machine_days = (op_station_df['開機數'] * op_station_df['OEE']).sum()
-                
-                osat_implied_max = total_qty / total_machine_days if total_machine_days > 0 else 0
-                osat_avg_oee = op_station_df['OEE'].mean() * 100
-                osat_actual_upd = total_qty / total_machines if total_machines > 0 else 0
-                
-                if is_ate_track:
-                    osat_speed_val = (86400 / osat_implied_max) * int(calc_site) if osat_implied_max > 0 else 0
-                    speed_gap = osat_speed_val - ie_speed_val
-                    is_speed_error = speed_gap > 2.0
-                    speed_gap_label = "TT GAP (Speed Variance)" if is_speed_error else "TT GAP"
-                else:
-                    osat_speed_val = osat_implied_max / 24 
-                    speed_gap = osat_speed_val - ie_speed_val
-                    is_speed_error = speed_gap < -(ie_speed_val * 0.05)
-                    speed_gap_label = "UPH GAP (Below Target)" if is_speed_error else "UPH GAP"
+        # ⚙️ 將設定參數區收納於此，保持畫面簡潔
+        with st.expander("⚙️ Target & Speed Configuration (Auto-Linked to Global)", expanded=False):
+            col_uph, col_oee = st.columns(2)
+            is_ate_track = selected_cat == "ATE"
+            
+            if is_ate_track:
+                with col_uph:
+                    st.markdown("<div style='padding-top: 10px; font-size: 13px; color: #64748b;'>🔗 Linked to Global Calc</div>", unsafe_allow_html=True)
+                with col_oee:
+                    st.markdown(f"<div style='padding-top: 10px; font-size: 13px; color: #0369a1; font-weight: 700;'>TT: {calc_test_time}s | Site: {calc_site}</div>", unsafe_allow_html=True)
+                    
+                ie_max_upd = (86400 / calc_test_time) * int(calc_site) if calc_test_time > 0 else 0
+                ie_target_upd = single_cap
+                ie_oee = calc_oee
+                speed_label = "TT"
+                speed_unit = "s"
+                ie_speed_val = calc_test_time
+            else:
+                with col_uph:
+                    std_uph = st.number_input("Standard UPH", min_value=1, value=1000, step=100)
+                with col_oee:
+                    local_target_oee = st.number_input("Target OEE %", min_value=0.0, max_value=100.0, value=85.0, step=1.0)
+                    
+                ie_max_upd = std_uph * 24
+                ie_target_upd = ie_max_upd * (local_target_oee / 100.0)
+                ie_oee = local_target_oee
+                speed_label = "UPH"
+                speed_unit = "ea/hr"
+                ie_speed_val = std_uph
 
-                ie_speed_str = f"{ie_speed_val:.1f}" if is_ate_track else f"{ie_speed_val:,.0f}"
-                osat_speed_str = f"{osat_speed_val:.1f}" if is_ate_track else f"{osat_speed_val:,.0f}"
-                speed_gap_str = f"+{speed_gap:.1f}" if (is_ate_track and speed_gap > 0) else (f"+{speed_gap:,.0f}" if (not is_ate_track and speed_gap > 0) else (f"{speed_gap:.1f}" if is_ate_track else f"{speed_gap:,.0f}"))
+        st.divider()
 
-                output_gap = osat_actual_upd - ie_target_upd
-                is_out_error = output_gap < -(ie_target_upd * 0.05)
-                out_label = "Out GAP (Below Target)" if is_out_error else "Out GAP"
-                out_val = f"+{output_gap:,.0f}" if output_gap > 0 else f"{output_gap:,.0f}"
-
-                st.markdown("---")
-                
-                # 重新組合子 Tab (僅顯示站點層級的資料)
-                mode_a_tabs = st.tabs(["🎯 Alignment & Gap Analysis", "📉 Station Waste Trend"])
-                
-                with mode_a_tabs[0]:
-                    col1, col2, col3 = st.columns(3)
-                    def kpi_row(label, value, unit, val_color, is_last=False):
-                        border_style = "none" if is_last else "1px solid rgba(0,0,0,0.06)"
-                        padding_btm = "0" if is_last else "10px"
-                        margin_btm = "0" if is_last else "10px"
-                        return f"<div style='display: flex; justify-content: space-between; align-items: baseline; border-bottom: {border_style}; padding-bottom: {padding_btm}; margin-bottom: {margin_btm};'><span style='font-size: 12px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;'>{label}</span><span style='font-size: 22px; color: {val_color}; font-weight: 800; line-height: 1;'>{value} <span style='font-size: 12px; color: #94a3b8; font-weight: 600;'>{unit}</span></span></div>"
-                    
-                    with col1:
-                        st.markdown("**🎯 Internal Target**")
-                        html_col1 = f"<div style='background-color: #f0f9ff; padding: 18px 20px; border-radius: 8px; border: 1px solid #bae6fd; display: flex; flex-direction: column; justify-content: space-between; height: 190px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>{kpi_row('MAX', f'{ie_max_upd:,.0f}', 'ea', '#0369a1')}{kpi_row(speed_label, ie_speed_str, speed_unit, '#0369a1')}{kpi_row('OEE', f'{ie_oee:.1f}', '%', '#0369a1')}{kpi_row('Target', f'{ie_target_upd:,.0f}', 'ea', '#0284c7', is_last=True)}</div>"
-                        st.markdown(html_col1, unsafe_allow_html=True)
-                        
-                    with col2:
-                        st.markdown("**🏭 OSAT Implied Baseline**")
-                        html_col2 = f"<div style='background-color: #fffbeb; padding: 18px 20px; border-radius: 8px; border: 1px solid #fde68a; display: flex; flex-direction: column; justify-content: space-between; height: 190px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>{kpi_row('MAX', f'{osat_implied_max:,.0f}', 'ea', '#b45309')}{kpi_row(f'Implied {speed_label}', osat_speed_str, speed_unit, '#b45309')}{kpi_row('OEE', f'{osat_avg_oee:.1f}', '%', '#b45309')}{kpi_row('Actual', f'{osat_actual_upd:,.0f}', 'ea', '#d97706', is_last=True)}</div>"
-                        st.markdown(html_col2, unsafe_allow_html=True)
-                        
-                    with col3:
-                        st.markdown("**📊 Variance Analysis**")
-                        def alert_box(label, value, unit, is_error, is_last=False):
-                            bg = "#fef2f2" if is_error else "#f0fdf4"
-                            border = "#fecaca" if is_error else "#bbf7d0"
-                            text = "#991b1b" if is_error else "#166534"
-                            margin_btm = "0" if is_last else "14px"
-                            return f"<div style='background-color: {bg}; padding: 0 18px; border-radius: 8px; border: 1px solid {border}; display: flex; flex-direction: column; justify-content: center; height: 88px; box-sizing: border-box; margin-bottom: {margin_btm}; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'><div style='font-size: 11px; color: {text}; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; opacity: 0.8; letter-spacing: 0.5px;'>{label}</div><div style='display: flex; justify-content: space-between; align-items: center;'><div><span style='font-size: 24px; color: {text}; font-weight: 800; line-height: 1;'>{value}</span> <span style='font-size: 13px; font-weight: 600;'>{unit}</span></div></div></div>"
-                        
-                        html_col3 = f"<div style='display: flex; flex-direction: column; height: 190px; box-sizing: border-box;'>{alert_box(speed_gap_label, speed_gap_str, speed_unit, is_speed_error)}{alert_box(out_label, out_val, 'ea', is_out_error, is_last=True)}</div>"
-                        st.markdown(html_col3, unsafe_allow_html=True)
-
-                    st.write("")
-                    fig_oee = go.Figure()
-                    fig_oee.add_trace(go.Bar(x=op_station_df['日期'], y=op_station_df['OEE'] * 100, name='OSAT Reported OEE%', marker_color='#CBD5E1', opacity=0.8))
-                    fig_oee.add_trace(go.Bar(x=op_station_df['日期'], y=op_station_df['True_OEE'] * 100, name='True OEE% (Based on Target)', marker_color='#0369A1'))
-                    fig_oee.update_layout(title=f"Efficiency Cross-Validation for {selected_osat_op}", barmode='group', yaxis_title="OEE Percentage (%)", xaxis_title="Date", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-                    st.plotly_chart(fig_oee, use_container_width=True)
-                    
-                    st.markdown("---")
-                    st.markdown("#### 📊 Daily Production & Gap Analysis")
-                    rca_display_df = op_station_df.copy()
-                    rca_display_df['OEE_Pct'] = rca_display_df['OEE'] * 100
-                    rca_display_df['True_OEE_Pct'] = rca_display_df['True_OEE'] * 100
-                    rca_display_df['UPD_Gap'] = rca_display_df['正測顆數'] - rca_display_df['Expected_Output']
-                    table_df = rca_display_df[['日期', '站點', '開機數', '正測顆數', 'Expected_Output', 'UPD_Gap', 'OEE_Pct', 'True_OEE_Pct']]
-                    st.dataframe(table_df, hide_index=True, use_container_width=True, column_config={"日期": st.column_config.DateColumn("Date", format="YYYY-MM-DD"), "站點": st.column_config.TextColumn("Operation"), "開機數": st.column_config.NumberColumn("Active Testers", format="%.2f"), "正測顆數": st.column_config.NumberColumn("Actual UPD", format="%d ea"), "Expected_Output": st.column_config.NumberColumn("Target UPD", format="%d ea"), "UPD_Gap": st.column_config.NumberColumn("UPD Gap", format="%d ea"), "OEE_Pct": st.column_config.NumberColumn("OSAT OEE", format="%.2f %%"), "True_OEE_Pct": st.column_config.NumberColumn("True OEE", format="%.2f %%")})
-
-                with mode_a_tabs[1]:
-                    st.markdown("#### 📉 Station Waste Trend")
-                    st.caption("Analyze macro waste distribution and daily trends across the selected operation.")
-                    
-                    # ==========================================
-                    # 🌟 1. 修正大於 100% 的「俄羅斯娃娃」維度降級演算法
-                    # ==========================================
-                    trend_df = op_station_df.copy()
-                    
-                    # 取得原始報表上的百分比 (未校正前)
-                    raw_run = trend_df['Run']
-                    raw_proc = safe_sum_cols(trend_df, ['SetUp', 'Rework', 'Clean', 'Corr', 'EQC'])
-                    raw_down = safe_sum_cols(trend_df, ['Down', 'PM', 'E1', 'E2'])
-                    raw_idle = safe_sum_cols(trend_df, ['Idle', 'Other'])
-                    
-                    # 核心還原：將 Run/Setup/Down 的比例，壓縮回「生產時間」的絕對維度中
-                    # 開機運作時間的佔比 = 100% - Idle%
-                    active_ratio = (1.0 - raw_idle).apply(lambda x: max(0, x))
-                    
-                    trend_df['Run_Cat'] = raw_run * active_ratio
-                    trend_df['Process_Cat'] = raw_proc * active_ratio
-                    trend_df['Down_Cat'] = raw_down * active_ratio
-                    trend_df['Idle_Cat'] = raw_idle  # Idle 本身就是基於生產時間，所以直接沿用
-                    
-                    # 安全防呆：確保每天的這四塊加起來絕對等於 100% (消除微小進位誤差)
-                    total_sum = trend_df['Run_Cat'] + trend_df['Process_Cat'] + trend_df['Down_Cat'] + trend_df['Idle_Cat']
-                    trend_df['Run_Cat'] = trend_df['Run_Cat'] / total_sum
-                    trend_df['Process_Cat'] = trend_df['Process_Cat'] / total_sum
-                    trend_df['Down_Cat'] = trend_df['Down_Cat'] / total_sum
-                    trend_df['Idle_Cat'] = trend_df['Idle_Cat'] / total_sum
-                    
-                    # ==========================================
-                    # 2. 計算總體圓餅圖的加權平均
-                    # ==========================================
-                    total_active_machines = trend_df['開機數'].sum()
-                    if total_active_machines > 0:
-                        avg_run = (trend_df['Run_Cat'] * trend_df['開機數']).sum() / total_active_machines
-                        avg_proc = (trend_df['Process_Cat'] * trend_df['開機數']).sum() / total_active_machines
-                        avg_down = (trend_df['Down_Cat'] * trend_df['開機數']).sum() / total_active_machines
-                        avg_idle = (trend_df['Idle_Cat'] * trend_df['開機數']).sum() / total_active_machines
-                    else:
-                        avg_run, avg_proc, avg_down, avg_idle = 0, 0, 0, 0
-                    
-                    c_pie, c_bar = st.columns([1, 2])
-                    # ==========================================
-                    # 1. 圓餅圖 (Donut Chart) - 強制小數點 2 位
-                    # ==========================================
-                    with c_pie:
-                        fig_donut = go.Figure(data=[go.Pie(
-                            labels=['Run', 'Setup', 'Down', 'Idle'],
-                            values=[avg_run, avg_proc, avg_down, avg_idle],
-                            hole=.4,
-                            marker_colors=['#5CB85C', '#F0AD4E', '#D9534F', '#95A5A6'],
-                            textinfo='label+percent',
-                            # 🌟 強制 Hover 視窗只顯示 名稱 與 百分比 (小數點 2 位)，隱藏冗長的原始數值
-                            hovertemplate='<b>%{label}</b><br>%{percent:.2f}<extra></extra>' 
-                        )])
-                        fig_donut.update_layout(
-                            title_text="Overall Waste Distribution",
-                            annotations=[dict(text='Avg %', x=0.5, y=0.5, font_size=16, showarrow=False)],
-                            showlegend=False,
-                            margin=dict(t=40, b=0, l=0, r=0)
-                        )
-                        st.plotly_chart(fig_donut, use_container_width=True)
-                    
-                    # ==========================================
-                    # 2. 堆疊趨勢圖 (Daily Trend) - 強制小數點 2 位
-                    # ==========================================
-                    with c_bar:
-                        fig_trend = go.Figure()
-                        
-                        # 🌟 利用 hovertemplate 強制規定彈出視窗的格式為 "名稱: 數值%"
-                        fig_trend.add_trace(go.Bar(
-                            x=trend_df['日期'], y=trend_df['Run_Cat']*100, 
-                            name='Run', marker_color='#5CB85C',
-                            hovertemplate='%{y:.2f}%<extra></extra>'
-                        ))
-                        fig_trend.add_trace(go.Bar(
-                            x=trend_df['日期'], y=trend_df['Process_Cat']*100, 
-                            name='Setup', marker_color='#F0AD4E',
-                            hovertemplate='%{y:.2f}%<extra></extra>'
-                        ))
-                        fig_trend.add_trace(go.Bar(
-                            x=trend_df['日期'], y=trend_df['Down_Cat']*100, 
-                            name='Down', marker_color='#D9534F',
-                            hovertemplate='%{y:.2f}%<extra></extra>'
-                        ))
-                        fig_trend.add_trace(go.Bar(
-                            x=trend_df['日期'], y=trend_df['Idle_Cat']*100, 
-                            name='Idle', marker_color='#95A5A6',
-                            hovertemplate='%{y:.2f}%<extra></extra>'
-                        ))
-                        
-                        fig_trend.update_layout(
-                            title="Daily Waste Trend (100% Normalized Production Time)",
-                            barmode='stack',
-                            yaxis_title="Percentage (%)",
-                            yaxis=dict(range=[0, 100]), 
-                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                            hovermode="x unified"
-                        )
-                        st.plotly_chart(fig_trend, use_container_width=True)
-                    
-                    st.markdown("---")
-                    
-                    # ==========================================
-                    # 🌟 3. Raw Data 精美格式化 (小數點 2 位與百分比)
-                    # ==========================================
-                    st.markdown("#### 📋 Station Level Raw Data")
-                    with st.expander("Click to view full station records (Sortable)"):
-                        display_df = op_station_df.copy()
-                        
-                        # 建立欄位顯示設定 (Column Config)
-                        col_configs = {
-                            "日期": st.column_config.DateColumn("日期", format="YYYY-MM-DD")
-                        }
-                        
-                        # 我們之前在解析 OSAT Excel 時所定義的百分比欄位清單
-                        pct_cols = [
-                            'E%', 'E_DO1%', 'DutOff%', '重工效率', '總產出效率', 
-                            'Run', 'Rework', 'SetUp', 'Down', 'Idle', 'PM', 'Other', 'OEE',
-                            'Clean', 'Corr', 'EQC', 'E1', 'E2'
-                        ]
-                        
-                        for col in display_df.columns:
-                            if col in pct_cols:
-                                # 將原本的 0.9023 乘回 100 變成 90.23，並加上 % 符號顯示
-                                display_df[col] = display_df[col] * 100 
-                                col_configs[col] = st.column_config.NumberColumn(col, format="%.2f %%")
-                            elif col in ['開機數']:
-                                # 開機數保留兩位小數點
-                                col_configs[col] = st.column_config.NumberColumn(col, format="%.2f")
-                            elif col in ['正測顆數', '測試顆數', '產出良品數', '生產時間', 'Expected_Output', 'Max_Possible_Output']:
-                                # 顆數與分鐘數顯示為整數
-                                col_configs[col] = st.column_config.NumberColumn(col, format="%d")
-                        
-                        st.dataframe(
-                            display_df, 
-                            use_container_width=True, 
-                            hide_index=True, 
-                            column_config=col_configs
-                        )
-                        
+        # ==========================================
+        # 📊 【第一層：站點大盤與落差分析】
+        # ==========================================
+        st.markdown(f"#### 🎯 Layer 1: Station Macro & Gap Analysis ({selected_osat_op} on {selected_date})")
+        
+        # 過濾出「單日、單站點」的總體數據
+        day_station_df = df_station_all[(df_station_all['站點'] == selected_osat_op) & (df_station_all['日期'] == selected_date)].copy()
+        
+        if day_station_df.empty:
+            st.warning("No station data found for the selected date.")
         else:
-            # ==========================================
-            # 🔵 模式 B：機台健康與稽核模式 (Tester Health & RCA)
-            # ==========================================
-            col_cat, col_date = st.columns([1, 3])
-            with col_cat:
-                selected_cat = st.selectbox("1. Equipment Group", options=list(active_categories.keys()), key="rca_cat")
+            day_station_df['Expected_Output'] = day_station_df['開機數'] * ie_target_upd
+            day_station_df['Max_Possible_Output'] = day_station_df['開機數'] * ie_max_upd
             
-            # 直接抓取該大群組(例如 ATE) 下的第一個站點所對應的 process_group，取得所有實體機台的資料！
-            first_op = active_categories[selected_cat][0]
-            selected_process = op_to_process[first_op]
-            df_machine = osat_db[selected_process]['machine']
+            total_qty = day_station_df['正測顆數'].sum()
+            total_machines = day_station_df['開機數'].sum()
+            total_machine_days = (day_station_df['開機數'] * day_station_df['OEE']).sum()
             
-            available_rca_dates = df_machine['日期'].unique().tolist()
+            osat_implied_max = total_qty / total_machine_days if total_machine_days > 0 else 0
+            osat_avg_oee = day_station_df['OEE'].mean() * 100
+            osat_actual_upd = total_qty / total_machines if total_machines > 0 else 0
             
-            with col_date:
-                if available_rca_dates:
-                    selected_rca_date = st.selectbox("2. Select Date for RCA Drill-down:", available_rca_dates)
+            # 速度與落差運算
+            if is_ate_track:
+                osat_speed_val = (86400 / osat_implied_max) * int(calc_site) if osat_implied_max > 0 else 0
+                speed_gap = osat_speed_val - ie_speed_val
+                is_speed_error = speed_gap > 2.0
+                speed_gap_label = "TT GAP (Speed Variance)" if is_speed_error else "TT GAP"
+            else:
+                osat_speed_val = osat_implied_max / 24 
+                speed_gap = osat_speed_val - ie_speed_val
+                is_speed_error = speed_gap < -(ie_speed_val * 0.05)
+                speed_gap_label = "UPH GAP (Below Target)" if is_speed_error else "UPH GAP"
+
+            ie_speed_str = f"{ie_speed_val:.1f}" if is_ate_track else f"{ie_speed_val:,.0f}"
+            osat_speed_str = f"{osat_speed_val:.1f}" if is_ate_track else f"{osat_speed_val:,.0f}"
+            speed_gap_str = f"+{speed_gap:.1f}" if (is_ate_track and speed_gap > 0) else (f"+{speed_gap:,.0f}" if (not is_ate_track and speed_gap > 0) else (f"{speed_gap:.1f}" if is_ate_track else f"{speed_gap:,.0f}"))
+
+            output_gap = osat_actual_upd - ie_target_upd
+            is_out_error = output_gap < -(ie_target_upd * 0.05)
+            out_label = "Out GAP (Below Target)" if is_out_error else "Out GAP"
+            out_val = f"+{output_gap:,.0f}" if output_gap > 0 else f"{output_gap:,.0f}"
+
+            # 🔥 提取 Retest Rate (重工率)
+            rework_rate = day_station_df['Rework'].iloc[0]
+            is_rework_error = rework_rate > 0.05
+            rework_str = f"{rework_rate*100:.1f}%"
+
+            # 畫面渲染：三大塊面板
+            col1, col2, col3 = st.columns(3)
+            
+            def kpi_row(label, value, unit, val_color, is_last=False):
+                border_style = "none" if is_last else "1px solid rgba(0,0,0,0.06)"
+                padding_btm = "0" if is_last else "10px"
+                margin_btm = "0" if is_last else "10px"
+                return f"<div style='display: flex; justify-content: space-between; align-items: baseline; border-bottom: {border_style}; padding-bottom: {padding_btm}; margin-bottom: {margin_btm};'><span style='font-size: 12px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;'>{label}</span><span style='font-size: 22px; color: {val_color}; font-weight: 800; line-height: 1;'>{value} <span style='font-size: 12px; color: #94a3b8; font-weight: 600;'>{unit}</span></span></div>"
+            
+            with col1:
+                st.markdown("**🎯 Internal Target**")
+                html_col1 = f"<div style='background-color: #f0f9ff; padding: 18px 20px; border-radius: 8px; border: 1px solid #bae6fd; display: flex; flex-direction: column; justify-content: space-between; height: 100%; min-height: 270px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>{kpi_row('MAX', f'{ie_max_upd:,.0f}', 'ea', '#0369a1')}{kpi_row(speed_label, ie_speed_str, speed_unit, '#0369a1')}{kpi_row('OEE', f'{ie_oee:.1f}', '%', '#0369a1')}{kpi_row('Target', f'{ie_target_upd:,.0f}', 'ea', '#0284c7', is_last=True)}</div>"
+                st.markdown(html_col1, unsafe_allow_html=True)
+                
+            with col2:
+                st.markdown("**🏭 OSAT Implied Baseline**")
+                html_col2 = f"<div style='background-color: #fffbeb; padding: 18px 20px; border-radius: 8px; border: 1px solid #fde68a; display: flex; flex-direction: column; justify-content: space-between; height: 100%; min-height: 270px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>{kpi_row('MAX', f'{osat_implied_max:,.0f}', 'ea', '#b45309')}{kpi_row(f'Implied {speed_label}', osat_speed_str, speed_unit, '#b45309')}{kpi_row('OEE', f'{osat_avg_oee:.1f}', '%', '#b45309')}{kpi_row('Actual', f'{osat_actual_upd:,.0f}', 'ea', '#d97706', is_last=True)}</div>"
+                st.markdown(html_col2, unsafe_allow_html=True)
+                
+            with col3:
+                st.markdown("**📊 Variance & Risk Analysis**")
+                def alert_box(label, value, unit, is_error, is_last=False):
+                    bg = "#fef2f2" if is_error else "#f0fdf4"
+                    border = "#fecaca" if is_error else "#bbf7d0"
+                    text = "#991b1b" if is_error else "#166534"
+                    margin_btm = "0" if is_last else "14px"
+                    return f"<div style='background-color: {bg}; padding: 0 18px; border-radius: 8px; border: 1px solid {border}; display: flex; flex-direction: column; justify-content: center; height: 80px; box-sizing: border-box; margin-bottom: {margin_btm}; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'><div style='font-size: 11px; color: {text}; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; opacity: 0.8; letter-spacing: 0.5px;'>{label}</div><div style='display: flex; justify-content: space-between; align-items: center;'><div><span style='font-size: 24px; color: {text}; font-weight: 800; line-height: 1;'>{value}</span> <span style='font-size: 13px; font-weight: 600;'>{unit}</span></div></div></div>"
+                
+                # 放入三個 Alert Box (含新加碼的 Retest Rate)
+                html_col3 = f"<div style='display: flex; flex-direction: column; height: 100%; min-height: 270px; box-sizing: border-box;'>{alert_box(speed_gap_label, speed_gap_str, speed_unit, is_speed_error)}{alert_box(out_label, out_val, 'ea', is_out_error)}{alert_box('Retest Rate (Risk)', rework_str, '%', is_rework_error, is_last=True)}</div>"
+                st.markdown(html_col3, unsafe_allow_html=True)
+
+        st.write("")
+        st.markdown("---")
+
+        # 篩選出當日對應 Equipment Group 下所有的機台 (Raw Data)
+        rca_machine_df = df_machine_all[df_machine_all['日期'] == selected_date].copy()
+        
+        # ==========================================
+        # 🚨 【第二層：戰犯點名排行榜 (Who is the Killer?)】
+        # ==========================================
+        st.markdown("#### 🚨 Layer 2: Yield Killers Ranking (Top 3 Offenders)")
+        st.caption("Quickly identify which testers dragged down the daily performance.")
+        
+        col_rw, col_dn, col_id = st.columns(3)
+
+        # 排行榜產生器
+        def make_top3_df(df, metric):
+            top3 = df[['機台代號', '正測顆數', metric]].sort_values(by=metric, ascending=False).head(3)
+            top3[metric] = top3[metric].apply(lambda x: f"{x*100:.1f}%")
+            return top3.rename(columns={'機台代號': 'Tester ID', '正測顆數': 'Total Qty', metric: f'{metric} %'})
+
+        with col_rw:
+            st.markdown("**💥 Top Rework (重測王)**")
+            st.dataframe(make_top3_df(rca_machine_df, 'Rework'), use_container_width=True, hide_index=True)
+        with col_dn:
+            st.markdown("**🛑 Top Down (當機王)**")
+            st.dataframe(make_top3_df(rca_machine_df, 'Down'), use_container_width=True, hide_index=True)
+        with col_id:
+            st.markdown("**💤 Top Idle (閒置王)**")
+            st.dataframe(make_top3_df(rca_machine_df, 'Idle'), use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+
+        # ==========================================
+        # 📈 【第三層：單機 1440 分鐘還原圖】
+        # ==========================================
+        # 直接霸氣展開，不再隱藏於折疊中。讓排行榜跟圖表視線無縫接軌！
+        if not rca_machine_df.empty:
+            render_rca_drilldown(rca_machine_df)
+        else:
+            st.info(f"No specific machine data logged for {selected_cat} on {selected_date}.")
+
+        st.write("")
+        st.write("")
+
+        # ==========================================
+        # 🗂️ 【第四層：OSAT 呈堂證供 (Raw Data)】
+        # ==========================================
+        with st.expander("🗂️ Layer 4: Full Machine Level Raw Data (Evidence)", expanded=False):
+            st.markdown("#### 📋 Machine Level Raw Data")
+            st.caption("Screenshot this raw data for OSAT auditing. (Auto-sorted by culprits)")
+            
+            if not rca_machine_df.empty:
+                # 1. 自動排序：把當天 Down 和 Rework 最高的機台排在前面
+                rca_machine_df = rca_machine_df.sort_values(by=['Down', 'Rework'], ascending=[False, False])
+                
+                # 2. 自動抓鬼高亮與格式化 (Pandas Styler)
+                pct_cols_list = [
+                    'E%', 'E_DO1%', 'DutOff%', '重工效率', '總產出效率', 
+                    'Run', 'Rework', 'SetUp', 'Down', 'Idle', 'PM', 'Other', 'OEE',
+                    'Clean', 'Corr', 'EQC', 'E1', 'E2'
+                ]
+                valid_pct_cols = [c for c in rca_machine_df.columns if c in pct_cols_list]
+                
+                # 定義小數點兩位的格式
+                format_dict = {col: "{:.2%}" for col in valid_pct_cols}
+                
+                # 定義高亮邏輯函數
+                def highlight_red(val):
+                    if isinstance(val, (int, float)) and val > 0.05:
+                        return 'background-color: #fee2e2; color: #991b1b; font-weight: bold;'
+                    return ''
+                    
+                def highlight_orange(val):
+                    if isinstance(val, (int, float)) and val > 0.10:
+                        return 'background-color: #ffedd5; color: #9a3412; font-weight: bold;'
+                    return ''
+                
+                styled_raw_df = rca_machine_df.style.format(format_dict)
+                
+                # 相容較新與舊版 Pandas API 的寫法
+                if hasattr(styled_raw_df, "map"):
+                    styled_raw_df = styled_raw_df.map(highlight_red, subset=['Down', 'Rework']) \
+                                                 .map(highlight_orange, subset=['Idle'])
                 else:
-                    st.warning("No dates available.")
-                    selected_rca_date = None
-            
-            st.markdown("---")
-            
-            if selected_rca_date:
-                rca_machine_df = df_machine[df_machine['日期'] == selected_rca_date].copy()
-                render_rca_drilldown(rca_machine_df)
+                    styled_raw_df = styled_raw_df.applymap(highlight_red, subset=['Down', 'Rework']) \
+                                                 .applymap(highlight_orange, subset=['Idle'])
                 
-                st.markdown("---")
-                
-                # ==========================================
-                # === 上半部：Top Yield Killers (滿版警報區) ===
-                # ==========================================
-                st.markdown("#### ⚠️ Top Yield Killers (Highest Rework & Down)")
-                st.caption("Quickly identify top offenders with Down > 10% or high Rework rates.")
-                
-                top_rework = rca_machine_df[['機台代號', '正測顆數', 'Rework', 'Down', 'Idle']].sort_values(by=['Down', 'Rework'], ascending=[False, False]).head(5)
-                top_rework['Rework'] = top_rework['Rework'].apply(lambda x: f"{x*100:.1f}%")
-                top_rework['Down'] = top_rework['Down'].apply(lambda x: f"{x*100:.1f}%")
-                top_rework['Idle'] = top_rework['Idle'].apply(lambda x: f"{x*100:.1f}%")
-                top_rework_display = top_rework.rename(columns={'機台代號': 'Tester ID', '正測顆數': 'Test Qty'})
-                
-                # 滿版顯示前 5 名戰犯
-                st.dataframe(top_rework_display, use_container_width=True, hide_index=True)
-                
-                st.write("") # 增加適當留白
-                
-                # ==========================================
-                # === 下半部：Machine Level Raw Data (折疊稽核區) ===
-                # ==========================================
-                with st.expander("📋 Click to view Full Machine Level Raw Data (Evidence)", expanded=False):
-                    st.markdown("#### 📋 Machine Level Raw Data (Evidence)")
-                    st.caption("Screenshot this raw data for OSAT auditing. (Auto-sorted by culprits)")
-                    
-                    # 1. 自動排序：把當天 Down 和 Rework 最高的機台排在前面
-                    rca_machine_df = rca_machine_df.sort_values(by=['Down', 'Rework'], ascending=[False, False])
-                    
-                    # 2. 自動抓鬼高亮與格式化 (Pandas Styler)
-                    pct_cols_list = [
-                        'E%', 'E_DO1%', 'DutOff%', '重工效率', '總產出效率', 
-                        'Run', 'Rework', 'SetUp', 'Down', 'Idle', 'PM', 'Other', 'OEE',
-                        'Clean', 'Corr', 'EQC', 'E1', 'E2'
-                    ]
-                    valid_pct_cols = [c for c in rca_machine_df.columns if c in pct_cols_list]
-                    
-                    # 定義小數點兩位的格式
-                    format_dict = {col: "{:.2%}" for col in valid_pct_cols}
-                    
-                    # 定義高亮邏輯函數
-                    def highlight_red(val):
-                        if isinstance(val, (int, float)) and val > 0.05:
-                            return 'background-color: #fee2e2; color: #991b1b; font-weight: bold;'
-                        return ''
-                        
-                    def highlight_orange(val):
-                        if isinstance(val, (int, float)) and val > 0.10:
-                            return 'background-color: #ffedd5; color: #9a3412; font-weight: bold;'
-                        return ''
-                    
-                    styled_raw_df = rca_machine_df.style.format(format_dict)
-                    
-                    # 相容較新與舊版 Pandas API 的寫法
-                    if hasattr(styled_raw_df, "map"):
-                        styled_raw_df = styled_raw_df.map(highlight_red, subset=['Down', 'Rework']) \
-                                                     .map(highlight_orange, subset=['Idle'])
-                    else:
-                        styled_raw_df = styled_raw_df.applymap(highlight_red, subset=['Down', 'Rework']) \
-                                                     .applymap(highlight_orange, subset=['Idle'])
-                    
-                    # 滿版顯示加上高亮特效的原始表
-                    st.dataframe(styled_raw_df, use_container_width=True, hide_index=True)
+                # 滿版顯示加上高亮特效的原始表
+                st.dataframe(styled_raw_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("No detailed machine data available to display.")
 
 # ==============================================================================
 # --- 📊 返回 Tab 1 剩餘執行區段 (含 st.stop 防呆) ---
