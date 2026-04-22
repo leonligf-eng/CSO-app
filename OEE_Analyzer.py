@@ -1449,7 +1449,18 @@ with main_tabs[2]:
                 ]
                 valid_pct_cols = [c for c in rca_machine_df.columns if c in pct_cols_list]
                 
+                # 1. 百分比小數點兩位格式化
                 format_dict = {col: "{:.2%}" for col in valid_pct_cols}
+                
+                # 🌟 修復：把顆數與時間強制格式化為整數 (並加上千分位逗號)
+                int_cols = ['正測顆數', '測試顆數', '產出良品數', '生產時間']
+                for col in int_cols:
+                    if col in rca_machine_df.columns:
+                        format_dict[col] = "{:,.0f}"
+                        
+                # 🌟 修復：開機數保留兩位小數
+                if '開機數' in rca_machine_df.columns:
+                    format_dict['開機數'] = "{:.2f}"
                 
                 def highlight_red(val):
                     if isinstance(val, (int, float)) and val > 0.05:
