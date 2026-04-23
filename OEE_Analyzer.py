@@ -1208,13 +1208,12 @@ with main_tabs[2]:
         active_categories = {k: v for k, v in category_mapping.items() if len(v) > 0}
         
         # =========================================================
-        # 🗺️ 全新 OSAT OEE Monitor 版面藍圖 (由上到下單頁式)
+        # 🔍 【頂部控制區：全域設定】(移除日期選擇，專注站點與參數)
         # =========================================================
-        
-        # 🔍 【頂部控制區】
         st.markdown("#### 🔍 Filter & Settings")
         
-        col_cat, col_st, col_date, col_cfg = st.columns([1, 1, 1.2, 1.8])
+        # 版面重配為 3 個 Column，讓 Config 區塊更寬裕
+        col_cat, col_st, col_cfg = st.columns([1, 1, 2.5])
         
         with col_cat:
             selected_cat = st.selectbox("1. Equipment Group", options=list(active_categories.keys()))
@@ -1225,15 +1224,7 @@ with main_tabs[2]:
         df_station_all = osat_db[selected_process]['station']
         df_machine_all = osat_db[selected_process]['machine']
         
-        # 取得該站點可用的所有日期，並預設為最新一天 (降冪排列)
         available_dates = sorted(df_station_all[df_station_all['站點'] == selected_osat_op]['日期'].unique().tolist(), reverse=True)
-        
-        with col_date:
-            if available_dates:
-                selected_date = st.selectbox("3. Select Date (Auto-latest)", options=available_dates, index=0)
-            else:
-                st.warning("No dates available for this station.")
-                st.stop()
 
         is_ate_track = selected_cat == "ATE"
         
@@ -1253,11 +1244,11 @@ with main_tabs[2]:
                 speed_unit = "s"
                 ie_speed_val = calc_test_time
             else:
-                sub_col1, sub_col2 = st.columns(2)
+                sub_col1, sub_col2, sub_col3 = st.columns([1, 1, 1])
                 with sub_col1:
-                    std_uph = st.number_input("4. Standard UPH", min_value=1, value=1000, step=100)
+                    std_uph = st.number_input("3. Standard UPH", min_value=1, value=1000, step=100)
                 with sub_col2:
-                    local_target_oee = st.number_input("5. Target OEE %", min_value=0.0, max_value=100.0, value=85.0, step=1.0)
+                    local_target_oee = st.number_input("4. Target OEE %", min_value=0.0, max_value=100.0, value=85.0, step=1.0)
                     
                 ie_max_upd = std_uph * 24
                 ie_target_upd = ie_max_upd * (local_target_oee / 100.0)
@@ -1268,17 +1259,93 @@ with main_tabs[2]:
 
         st.divider()
 
-        # ==========================================
-        # 📊 【第一層：站點大盤與落差分析】
-        # ==========================================
-        st.markdown(f"#### 🎯 Layer 1: Station Macro & Gap Analysis ({selected_osat_op} on {selected_date})")
+        # =========================================================
+        # 📈 【Layer 1：全歷史雷達 (趨勢圖與站點歷史表)】
+        # =========================================================
+        st.markdown(f"#### 📈 Layer 1: Station Trend Overview ({selected_osat_op})")
+        st.caption("Review historical trends to identify systemic drops or continuous shortfalls.")
         
+        # 繪製趨勢圖 (雙 Y 軸)
+        trend_df = df_station_all[df_station_all['站點'] == selected_osat_op].copy()
+        trend_df = trend_df.sort_values('日期', ascending=True)
+        trend_df['Target_Output'] = trend_df['開機數'] * ie_target_upd
+        
+        fig_trend = go.Figure()
+        
+        # 1. 實際產出 (主 Y 軸)
+        fig_trend.add_trace(go.Bar(
+            x=trend_df['日期'], y=trend_df['正測顆數'], 
+            name="Actual Output", marker_color='#38bdf8', 
+            text=trend_df['正測顆數'].apply(lambda x: f"{x:,.0f}"), textposition='auto',
+            hovertemplate='Actual: %{y:,.0f} ea<extra></extra>'
+        ))
+        # 2. 目標產線 (主 Y 軸)
+        fig_trend.add_trace(go.Scatter(
+            x=trend_df['日期'], y=trend_df['Target_Output'], 
+            name="Target Baseline", mode="lines+markers", 
+            line=dict(color='#f59e0b', width=3, dash='dash'),
+            hovertemplate='Target: %{y:,.0f} ea<extra></extra>'
+        ))
+        # 3. 開機數 (副 Y 軸)
+        fig_trend.add_trace(go.Scatter(
+            x=trend_df['日期'], y=trend_df['開機數'], 
+            name="Active Testers", mode="lines+markers", 
+            line=dict(color='#94a3b8', width=2), marker=dict(symbol='square'),
+            yaxis='y2', hovertemplate='Testers: %{y:.2f} eq<extra></extra>'
+        ))
+        
+        fig_trend.update_layout(
+            height=350, margin=dict(l=10, r=10, t=30, b=10),
+            hovermode="x unified",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            plot_bgcolor='rgba(255,255,255,1)',
+            yaxis=dict(title="Output Quantity (ea)", gridcolor='#f1f5f9', rangemode='tozero'),
+            yaxis2=dict(title="Active Testers (eq)", overlaying='y', side='right', showgrid=False, rangemode='tozero'),
+            xaxis=dict(title="")
+        )
+        st.plotly_chart(fig_trend, use_container_width=True)
+        
+        # 將站點層級歷史表收納於此 (因為是看趨勢，不再需要單日 Toggle)
+        with st.expander(f"🗂️ View Historical Station Raw Data ({selected_osat_op})", expanded=False):
+            display_station_df = trend_df.sort_values('日期', ascending=False)
+            
+            col_configs = {"日期": st.column_config.DateColumn("Date", format="YYYY-MM-DD")}
+            pct_cols_list = ['E%', 'E_DO1%', 'DutOff%', '重工效率', '總產出效率', 'Run', 'Rework', 'SetUp', 'Down', 'Idle', 'PM', 'Other', 'OEE', 'Clean', 'Corr', 'EQC', 'E1', 'E2']
+            
+            for col in display_station_df.columns:
+                if col in pct_cols_list:
+                    display_station_df[col] = display_station_df[col] * 100 
+                    col_configs[col] = st.column_config.NumberColumn(col, format="%.2f %%")
+                elif col in ['開機數']:
+                    col_configs[col] = st.column_config.NumberColumn(col, format="%.2f")
+                elif col in ['正測顆數', '測試顆數', '產出良品數', '生產時間']:
+                    col_configs[col] = st.column_config.NumberColumn(col, format="%d")
+                    
+            st.dataframe(display_station_df, use_container_width=True, hide_index=True, column_config=col_configs)
+
+        st.divider()
+
+        # =========================================================
+        # 🎯 【Layer 2：鎖定異常日 (單日診斷 RCA)】
+        # =========================================================
+        st.markdown("#### 🎯 Layer 2: Single Day Diagnosis (RCA)")
+        
+        # 獨立顯眼的 Date Selector
+        col_d1, col_d2 = st.columns([1.5, 3.5])
+        with col_d1:
+            if available_dates:
+                selected_date = st.selectbox("🔍 Select Date to Diagnose", options=available_dates, index=0)
+            else:
+                st.warning("No dates available.")
+                st.stop()
+                
         # 過濾出「單日、單站點」的總體數據
         day_station_df = df_station_all[(df_station_all['站點'] == selected_osat_op) & (df_station_all['日期'] == selected_date)].copy()
         
         if day_station_df.empty:
             st.warning("No station data found for the selected date.")
         else:
+            # === 單日指標運算 ===
             day_station_df['Expected_Output'] = day_station_df['開機數'] * ie_target_upd
             day_station_df['Max_Possible_Output'] = day_station_df['開機數'] * ie_max_upd
             
@@ -1292,7 +1359,6 @@ with main_tabs[2]:
             osat_avg_oee = day_station_df['OEE'].mean() * 100
             osat_actual_upd = total_qty / total_machines if total_machines > 0 else 0
             
-            # 速度與落差運算
             if is_ate_track:
                 osat_speed_val = (86400 / osat_implied_max) * int(calc_site) if osat_implied_max > 0 else 0
                 speed_gap = osat_speed_val - ie_speed_val
@@ -1313,17 +1379,16 @@ with main_tabs[2]:
             out_label = "Out GAP (Below Target)" if is_out_error else "Out GAP"
             out_val = f"+{output_gap:,.0f}" if output_gap > 0 else f"{output_gap:,.0f}"
 
-            # 提取 Retest Rate (重工率) - 25% 標準
             rework_rate = day_station_df['Rework'].iloc[0]
             is_rework_error = rework_rate > 0.25
             rework_str = f"{rework_rate*100:.2f}"
 
-            # 新增站點良率 (Station Yield) - 小於 95% 警報
             yield_rate = (total_pass_qty / total_test_qty) if total_test_qty > 0 else 0
             is_yield_error = yield_rate < 0.95
             yield_str = f"{yield_rate*100:.2f}"
 
-            # 畫面渲染：三大塊面板
+            # === 渲染 Macro 面板 ===
+            st.markdown(f"##### 📊 Macro & Gap Analysis ({selected_osat_op} on {selected_date})")
             col1, col2, col3 = st.columns(3)
             
             def kpi_row(label, value, unit, val_color, is_last=False):
@@ -1354,242 +1419,120 @@ with main_tabs[2]:
                 html_col3 = f"<div style='display: flex; flex-direction: column; height: 100%; min-height: 280px; box-sizing: border-box;'>{alert_box(speed_gap_label, speed_gap_str, speed_unit, is_speed_error)}{alert_box(out_label, out_val, 'ea', is_out_error)}{alert_box('Retest Rate (Risk)', rework_str, '%', is_rework_error)}{alert_box('Station Yield (Risk)', yield_str, '%', is_yield_error, is_last=True)}</div>"
                 st.markdown(html_col3, unsafe_allow_html=True)
 
-        st.write("")
-        
-        # ==========================================
-        # 📉 【Layer 1.5：站點歷史趨勢與 Raw Data】
-        # ==========================================
-        with st.expander(f"📉 View Station Trend & Raw Data ({selected_osat_op})", expanded=True):
-            
-            # Station Level Trend Chart (永遠顯示歷史全貌)
-            st.markdown("#### 📈 Output Trend vs. Target Baseline")
-            
-            trend_df = df_station_all[df_station_all['站點'] == selected_osat_op].copy()
-            trend_df = trend_df.sort_values('日期', ascending=True)
-            trend_df['Target_Output'] = trend_df['開機數'] * ie_target_upd
-            
-            fig_trend = go.Figure()
-            
-            # 1. 實際產出 (主 Y 軸 - 左側)
-            fig_trend.add_trace(go.Bar(
-                x=trend_df['日期'], 
-                y=trend_df['正測顆數'], 
-                name="Actual Output", 
-                marker_color='#38bdf8', 
-                text=trend_df['正測顆數'].apply(lambda x: f"{x:,.0f}"), 
-                textposition='auto',
-                hovertemplate='Actual: %{y:,.0f} ea<extra></extra>'
-            ))
-            
-            # 2. 目標產線 (主 Y 軸 - 左側)
-            fig_trend.add_trace(go.Scatter(
-                x=trend_df['日期'], 
-                y=trend_df['Target_Output'], 
-                name="Target Baseline", 
-                mode="lines+markers", 
-                line=dict(color='#f59e0b', width=3, dash='dash'),
-                hovertemplate='Target: %{y:,.0f} ea<extra></extra>'
-            ))
-            
-            # 🌟 3. 新增：開機數 (副 Y 軸 - 右側)
-            fig_trend.add_trace(go.Scatter(
-                x=trend_df['日期'], 
-                y=trend_df['開機數'], 
-                name="Active Testers", 
-                mode="lines+markers", 
-                line=dict(color='#94a3b8', width=2), # 低調的灰藍色
-                marker=dict(symbol='square'),
-                yaxis='y2', # 告訴 Plotly 這條線要對應右邊的副 Y 軸
-                hovertemplate='Testers: %{y:.2f} eq<extra></extra>'
-            ))
-            
-            fig_trend.update_layout(
-                height=350,
-                margin=dict(l=10, r=10, t=30, b=10),
-                hovermode="x unified",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                plot_bgcolor='rgba(255,255,255,1)',
-                yaxis=dict(
-                    title="Output Quantity (ea)", 
-                    gridcolor='#f1f5f9',
-                    rangemode='tozero' # 強制從 0 開始
-                ),
-                # 🌟 新增副 Y 軸設定
-                yaxis2=dict(
-                    title="Active Testers (eq)",
-                    overlaying='y',
-                    side='right',
-                    showgrid=False,
-                    rangemode='tozero' # 強制從 0 開始，視覺比例才會正確
-                ),
-                xaxis=dict(title="")
-            )
-            st.plotly_chart(fig_trend, use_container_width=True)
-            
             st.markdown("---")
+
+            # ==========================================
+            # 🚨 【戰犯點名排行榜】
+            # ==========================================
+            rca_machine_df = df_machine_all[df_machine_all['日期'] == selected_date].copy()
             
-            # 📋 Station Raw Data 表格區
-            st.markdown("#### 📋 Station Level Raw Data")
+            st.markdown("##### 🚨 Yield Killers Ranking (Top 3 Offenders)")
             
-            col_tog, col_cap = st.columns([1.2, 4])
-            with col_tog:
-                apply_date_filter = st.toggle(f"Filter by ({selected_date})", value=True)
-            with col_cap:
-                if apply_date_filter:
-                    st.markdown(f"<div style='padding-top: 10px; font-size: 14px; color: #64748b;'>Showing reporting data for <b>{selected_osat_op}</b> on <b>{selected_date}</b>.</div>", unsafe_allow_html=True)
-                else:
-                    st.markdown(f"<div style='padding-top: 10px; font-size: 14px; color: #64748b;'>Showing historical reporting data for <b>{selected_osat_op}</b> across all available dates.</div>", unsafe_allow_html=True)
-            
-            if apply_date_filter:
-                display_station_df = df_station_all[(df_station_all['站點'] == selected_osat_op) & (df_station_all['日期'] == selected_date)].copy()
+            total_down_sum = rca_machine_df['Down'].sum()
+            if total_down_sum > 0:
+                top3_down_sum = rca_machine_df['Down'].sort_values(ascending=False).head(3).sum()
+                pareto_ratio = (top3_down_sum / total_down_sum) * 100
+                st.markdown(f"<div style='background-color: #fff7ed; padding: 10px 15px; border-left: 4px solid #f97316; border-radius: 4px; font-size: 14px; color: #9a3412; margin-bottom: 15px;'>💡 <b>Pareto Insight:</b> The Top 3 offenders account for <b>{pareto_ratio:.0f}%</b> of the station's total downtime today.</div>", unsafe_allow_html=True)
             else:
-                display_station_df = df_station_all[df_station_all['站點'] == selected_osat_op].copy()
-                
-            display_station_df = display_station_df.sort_values('日期', ascending=False)
+                st.caption("Quickly identify which testers dragged down the daily performance.")
             
-            col_configs = {
-                "日期": st.column_config.DateColumn("Date", format="YYYY-MM-DD")
-            }
+            col_rw, col_dn, col_id = st.columns(3)
+
+            def make_top3_df(df, metric):
+                offenders = df[df[metric] > 0]
+                top3 = offenders[['機台代號', '正測顆數', metric]].sort_values(by=metric, ascending=False).head(3)
+                if not top3.empty:
+                    top3[metric] = top3[metric].apply(lambda x: f"{x*100:.2f}%")
+                return top3.rename(columns={'機台代號': 'Tester ID', '正測顆數': 'Total Qty', metric: f'{metric} %'})
+
+            with col_rw:
+                st.markdown("**💥 Top Rework**")
+                st.dataframe(make_top3_df(rca_machine_df, 'Rework'), use_container_width=True, hide_index=True)
+            with col_dn:
+                st.markdown("**🛑 Top Down**")
+                st.dataframe(make_top3_df(rca_machine_df, 'Down'), use_container_width=True, hide_index=True)
+            with col_id:
+                st.markdown("**💤 Top Idle**")
+                st.dataframe(make_top3_df(rca_machine_df, 'Idle'), use_container_width=True, hide_index=True)
+
+            st.write("")
             
-            pct_cols_list = [
-                'E%', 'E_DO1%', 'DutOff%', '重工效率', '總產出效率', 
-                'Run', 'Rework', 'SetUp', 'Down', 'Idle', 'PM', 'Other', 'OEE',
-                'Clean', 'Corr', 'EQC', 'E1', 'E2'
-            ]
-            
-            for col in display_station_df.columns:
-                if col in pct_cols_list:
-                    display_station_df[col] = display_station_df[col] * 100 
-                    col_configs[col] = st.column_config.NumberColumn(col, format="%.2f %%")
-                elif col in ['開機數']:
-                    col_configs[col] = st.column_config.NumberColumn(col, format="%.2f")
-                elif col in ['正測顆數', '測試顆數', '產出良品數', '生產時間']:
-                    col_configs[col] = st.column_config.NumberColumn(col, format="%d")
-                    
-            st.dataframe(
-                display_station_df, 
-                use_container_width=True, 
-                hide_index=True, 
-                column_config=col_configs
-            )
-
-        st.markdown("---")
-
-        rca_machine_df = df_machine_all[df_machine_all['日期'] == selected_date].copy()
-        
-        # ==========================================
-        # 🚨 【第二層：戰犯點名排行榜 (Who is the Killer?)】
-        # ==========================================
-        st.markdown("#### 🚨 Layer 2: Yield Killers Ranking (Top 3 Offenders)")
-        
-        # Pareto Impact Ratio
-        total_down_sum = rca_machine_df['Down'].sum()
-        if total_down_sum > 0:
-            top3_down_sum = rca_machine_df['Down'].sort_values(ascending=False).head(3).sum()
-            pareto_ratio = (top3_down_sum / total_down_sum) * 100
-            st.markdown(f"<div style='background-color: #fff7ed; padding: 10px 15px; border-left: 4px solid #f97316; border-radius: 4px; font-size: 14px; color: #9a3412; margin-bottom: 15px;'>💡 <b>Pareto Insight:</b> The Top 3 offenders account for <b>{pareto_ratio:.0f}%</b> of the station's total downtime today.</div>", unsafe_allow_html=True)
-        else:
-            st.caption("Quickly identify which testers dragged down the daily performance.")
-        
-        col_rw, col_dn, col_id = st.columns(3)
-
-        # 排行榜產生器：已移除 Est. Lost 功能
-        def make_top3_df(df, metric):
-            offenders = df[df[metric] > 0]
-            top3 = offenders[['機台代號', '正測顆數', metric]].sort_values(by=metric, ascending=False).head(3)
-            
-            if not top3.empty:
-                top3[metric] = top3[metric].apply(lambda x: f"{x*100:.2f}%")
-                
-            return top3.rename(columns={'機台代號': 'Tester ID', '正測顆數': 'Total Qty', metric: f'{metric} %'})
-
-        with col_rw:
-            st.markdown("**💥 Top Rework**")
-            st.dataframe(make_top3_df(rca_machine_df, 'Rework'), use_container_width=True, hide_index=True)
-        with col_dn:
-            st.markdown("**🛑 Top Down**")
-            st.dataframe(make_top3_df(rca_machine_df, 'Down'), use_container_width=True, hide_index=True)
-        with col_id:
-            st.markdown("**💤 Top Idle**")
-            st.dataframe(make_top3_df(rca_machine_df, 'Idle'), use_container_width=True, hide_index=True)
-
-        st.write("")
-        
-        # ==========================================
-        # 🗂️ 【Layer 2.5：OSAT 單機呈堂證供 (Raw Data)】
-        # ==========================================
-        with st.expander("🗂️ View Machine Level Raw Data (Evidence)", expanded=True):
-            st.markdown("#### 📋 Machine Level Raw Data")
-            st.caption("Screenshot this raw data for OSAT auditing. (Sorted by Tester ID)")
-            
+            # ==========================================
+            # 📈 【1440 分鐘還原圖】
+            # ==========================================
             if not rca_machine_df.empty:
-                rca_machine_df = rca_machine_df.sort_values(by=['機台代號'], ascending=True)
-                
-                pct_cols_list = [
-                    'E%', 'E_DO1%', 'DutOff%', '重工效率', '總產出效率', 
-                    'Run', 'Rework', 'SetUp', 'Down', 'Idle', 'PM', 'Other', 'OEE',
-                    'Clean', 'Corr', 'EQC', 'E1', 'E2'
-                ]
-                valid_pct_cols = [c for c in rca_machine_df.columns if c in pct_cols_list]
-                
-                def safe_pct(x):
-                    try: return f"{float(x):.2%}" if pd.notnull(x) else "-"
-                    except: return str(x)
-                        
-                def safe_int(x):
-                    try: return f"{float(x):,.0f}" if pd.notnull(x) else "-"
-                    except: return str(x)
-                        
-                def safe_float(x):
-                    try: return f"{float(x):.2f}" if pd.notnull(x) else "-"
-                    except: return str(x)
-                
-                format_dict = {col: safe_pct for col in valid_pct_cols}
-                
-                int_cols = ['正測顆數', '測試顆數', '產出良品數', '生產時間']
-                for col in int_cols:
-                    if col in rca_machine_df.columns:
-                        format_dict[col] = safe_int
-                        
-                if '開機數' in rca_machine_df.columns:
-                    format_dict['開機數'] = safe_float
-                
-                def highlight_red(val):
-                    if isinstance(val, (int, float)) and val > 0.05:
-                        return 'background-color: #fee2e2; color: #991b1b; font-weight: bold;'
-                    return ''
-                    
-                def highlight_orange(val):
-                    if isinstance(val, (int, float)) and val > 0.10:
-                        return 'background-color: #ffedd5; color: #9a3412; font-weight: bold;'
-                    return ''
-                
-                styled_raw_df = rca_machine_df.style.format(format_dict)
-                
-                if hasattr(styled_raw_df, "map"):
-                    styled_raw_df = styled_raw_df.map(highlight_red, subset=['Down', 'Rework']) \
-                                                 .map(highlight_orange, subset=['Idle'])
-                else:
-                    styled_raw_df = styled_raw_df.applymap(highlight_red, subset=['Down', 'Rework']) \
-                                                 .applymap(highlight_orange, subset=['Idle'])
-                
-                st.dataframe(styled_raw_df, use_container_width=True, hide_index=True)
+                render_rca_drilldown(rca_machine_df)
             else:
-                st.info("No detailed machine data available to display.")
+                st.info(f"No specific machine data logged for {selected_cat} on {selected_date}.")
 
-        st.markdown("---")
+            st.write("")
 
-        # ==========================================
-        # 📈 【第三層：單機 1440 分鐘還原圖】
-        # ==========================================
-        if not rca_machine_df.empty:
-            render_rca_drilldown(rca_machine_df)
-        else:
-            st.info(f"No specific machine data logged for {selected_cat} on {selected_date}.")
+            # ==========================================
+            # 🗂️ 【OSAT 單機呈堂證供 (Raw Data)】
+            # ==========================================
+            with st.expander("🗂️ View Machine Level Raw Data (Evidence)", expanded=True):
+                st.markdown("#### 📋 Machine Level Raw Data")
+                st.caption("Screenshot this raw data for OSAT auditing. (Sorted by Tester ID)")
+                
+                if not rca_machine_df.empty:
+                    rca_machine_df = rca_machine_df.sort_values(by=['機台代號'], ascending=True)
+                    
+                    pct_cols_list = [
+                        'E%', 'E_DO1%', 'DutOff%', '重工效率', '總產出效率', 
+                        'Run', 'Rework', 'SetUp', 'Down', 'Idle', 'PM', 'Other', 'OEE',
+                        'Clean', 'Corr', 'EQC', 'E1', 'E2'
+                    ]
+                    valid_pct_cols = [c for c in rca_machine_df.columns if c in pct_cols_list]
+                    
+                    def safe_pct(x):
+                        try: return f"{float(x):.2%}" if pd.notnull(x) else "-"
+                        except: return str(x)
+                            
+                    def safe_int(x):
+                        try: return f"{float(x):,.0f}" if pd.notnull(x) else "-"
+                        except: return str(x)
+                            
+                    def safe_float(x):
+                        try: return f"{float(x):.2f}" if pd.notnull(x) else "-"
+                        except: return str(x)
+                    
+                    format_dict = {col: safe_pct for col in valid_pct_cols}
+                    
+                    int_cols = ['正測顆數', '測試顆數', '產出良品數', '生產時間']
+                    for col in int_cols:
+                        if col in rca_machine_df.columns:
+                            format_dict[col] = safe_int
+                            
+                    if '開機數' in rca_machine_df.columns:
+                        format_dict['開機數'] = safe_float
+                    
+                    def highlight_red(val):
+                        if isinstance(val, (int, float)) and val > 0.05:
+                            return 'background-color: #fee2e2; color: #991b1b; font-weight: bold;'
+                        return ''
+                        
+                    def highlight_orange(val):
+                        if isinstance(val, (int, float)) and val > 0.10:
+                            return 'background-color: #ffedd5; color: #9a3412; font-weight: bold;'
+                        return ''
+                    
+                    styled_raw_df = rca_machine_df.style.format(format_dict)
+                    
+                    if hasattr(styled_raw_df, "map"):
+                        styled_raw_df = styled_raw_df.map(highlight_red, subset=['Down', 'Rework']) \
+                                                     .map(highlight_orange, subset=['Idle'])
+                    else:
+                        styled_raw_df = styled_raw_df.applymap(highlight_red, subset=['Down', 'Rework']) \
+                                                     .applymap(highlight_orange, subset=['Idle'])
+                    
+                    st.dataframe(styled_raw_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No detailed machine data available to display.")
 
 # ==============================================================================
 # --- 📊 返回 Tab 1 剩餘執行區段 (含 st.stop 防呆) ---
 # ==============================================================================
+
 with main_tabs[0]:
     # ⚠️ 這裡完整保留您的 st.stop()
     if not selected_ops or not selected_progs or not selected_prods:
