@@ -1283,6 +1283,8 @@ with main_tabs[2]:
             day_station_df['Max_Possible_Output'] = day_station_df['開機數'] * ie_max_upd
             
             total_qty = day_station_df['正測顆數'].sum()
+            total_test_qty = day_station_df['測試顆數'].sum()
+            total_pass_qty = day_station_df['產出良品數'].sum()
             total_machines = day_station_df['開機數'].sum()
             total_machine_days = (day_station_df['開機數'] * day_station_df['OEE']).sum()
             
@@ -1311,10 +1313,15 @@ with main_tabs[2]:
             out_label = "Out GAP (Below Target)" if is_out_error else "Out GAP"
             out_val = f"+{output_gap:,.0f}" if output_gap > 0 else f"{output_gap:,.0f}"
 
-            # 🔥 提取 Retest Rate (重工率) - 小數點兩位
+            # 提取 Retest Rate (重工率) - 25% 標準
             rework_rate = day_station_df['Rework'].iloc[0]
             is_rework_error = rework_rate > 0.25
             rework_str = f"{rework_rate*100:.2f}"
+
+            # 新增站點良率 (Station Yield) - 小於 95% 警報
+            yield_rate = (total_pass_qty / total_test_qty) if total_test_qty > 0 else 0
+            is_yield_error = yield_rate < 0.95
+            yield_str = f"{yield_rate*100:.2f}"
 
             # 畫面渲染：三大塊面板
             col1, col2, col3 = st.columns(3)
@@ -1327,12 +1334,12 @@ with main_tabs[2]:
             
             with col1:
                 st.markdown("**🎯 Internal Target**")
-                html_col1 = f"<div style='background-color: #f0f9ff; padding: 18px 20px; border-radius: 8px; border: 1px solid #bae6fd; display: flex; flex-direction: column; justify-content: space-between; height: 100%; min-height: 270px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>{kpi_row('MAX', f'{ie_max_upd:,.0f}', 'ea', '#0369a1')}{kpi_row(speed_label, ie_speed_str, speed_unit, '#0369a1')}{kpi_row('OEE', f'{ie_oee:.2f}', '%', '#0369a1')}{kpi_row('Target', f'{ie_target_upd:,.0f}', 'ea', '#0284c7', is_last=True)}</div>"
+                html_col1 = f"<div style='background-color: #f0f9ff; padding: 18px 20px; border-radius: 8px; border: 1px solid #bae6fd; display: flex; flex-direction: column; justify-content: space-between; height: 100%; min-height: 280px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>{kpi_row('MAX', f'{ie_max_upd:,.0f}', 'ea', '#0369a1')}{kpi_row(speed_label, ie_speed_str, speed_unit, '#0369a1')}{kpi_row('OEE', f'{ie_oee:.2f}', '%', '#0369a1')}{kpi_row('Target', f'{ie_target_upd:,.0f}', 'ea', '#0284c7', is_last=True)}</div>"
                 st.markdown(html_col1, unsafe_allow_html=True)
                 
             with col2:
                 st.markdown("**🏭 OSAT Implied Baseline**")
-                html_col2 = f"<div style='background-color: #fffbeb; padding: 18px 20px; border-radius: 8px; border: 1px solid #fde68a; display: flex; flex-direction: column; justify-content: space-between; height: 100%; min-height: 270px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>{kpi_row('MAX', f'{osat_implied_max:,.0f}', 'ea', '#b45309')}{kpi_row(f'Implied {speed_label}', osat_speed_str, speed_unit, '#b45309')}{kpi_row('OEE', f'{osat_avg_oee:.2f}', '%', '#b45309')}{kpi_row('Actual', f'{osat_actual_upd:,.0f}', 'ea', '#d97706', is_last=True)}</div>"
+                html_col2 = f"<div style='background-color: #fffbeb; padding: 18px 20px; border-radius: 8px; border: 1px solid #fde68a; display: flex; flex-direction: column; justify-content: space-between; height: 100%; min-height: 280px; box-sizing: border-box; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'>{kpi_row('MAX', f'{osat_implied_max:,.0f}', 'ea', '#b45309')}{kpi_row(f'Implied {speed_label}', osat_speed_str, speed_unit, '#b45309')}{kpi_row('OEE', f'{osat_avg_oee:.2f}', '%', '#b45309')}{kpi_row('Actual', f'{osat_actual_upd:,.0f}', 'ea', '#d97706', is_last=True)}</div>"
                 st.markdown(html_col2, unsafe_allow_html=True)
                 
             with col3:
@@ -1341,22 +1348,63 @@ with main_tabs[2]:
                     bg = "#fef2f2" if is_error else "#f0fdf4"
                     border = "#fecaca" if is_error else "#bbf7d0"
                     text = "#991b1b" if is_error else "#166534"
-                    margin_btm = "0" if is_last else "14px"
-                    return f"<div style='background-color: {bg}; padding: 0 18px; border-radius: 8px; border: 1px solid {border}; display: flex; flex-direction: column; justify-content: center; height: 80px; box-sizing: border-box; margin-bottom: {margin_btm}; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'><div style='font-size: 11px; color: {text}; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; opacity: 0.8; letter-spacing: 0.5px;'>{label}</div><div style='display: flex; align-items: baseline;'><div style='flex: 1;'></div><div style='width: 100px; text-align: right; font-size: 24px; color: {text}; font-weight: 800; line-height: 1;'>{value}</div><div style='width: 30px; text-align: left; padding-left: 8px; font-size: 13px; font-weight: 600; color: {text};'>{unit}</div></div></div>"
+                    margin_btm = "0" if is_last else "8px"
+                    return f"<div style='background-color: {bg}; padding: 0 15px; border-radius: 8px; border: 1px solid {border}; display: flex; flex-direction: column; justify-content: center; height: 64px; box-sizing: border-box; margin-bottom: {margin_btm}; box-shadow: 1px 1px 3px rgba(0,0,0,0.02);'><div style='font-size: 10px; color: {text}; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; opacity: 0.8; letter-spacing: 0.5px;'>{label}</div><div style='display: flex; align-items: baseline;'><div style='flex: 1;'></div><div style='width: 100px; text-align: right; font-size: 20px; color: {text}; font-weight: 800; line-height: 1;'>{value}</div><div style='width: 30px; text-align: left; padding-left: 8px; font-size: 12px; font-weight: 600; color: {text};'>{unit}</div></div></div>"
                 
-                html_col3 = f"<div style='display: flex; flex-direction: column; height: 100%; min-height: 270px; box-sizing: border-box;'>{alert_box(speed_gap_label, speed_gap_str, speed_unit, is_speed_error)}{alert_box(out_label, out_val, 'ea', is_out_error)}{alert_box('Retest Rate (Risk)', rework_str, '%', is_rework_error, is_last=True)}</div>"
+                html_col3 = f"<div style='display: flex; flex-direction: column; height: 100%; min-height: 280px; box-sizing: border-box;'>{alert_box(speed_gap_label, speed_gap_str, speed_unit, is_speed_error)}{alert_box(out_label, out_val, 'ea', is_out_error)}{alert_box('Retest Rate (Risk)', rework_str, '%', is_rework_error)}{alert_box('Station Yield (Risk)', yield_str, '%', is_yield_error, is_last=True)}</div>"
                 st.markdown(html_col3, unsafe_allow_html=True)
 
         st.write("")
         
         # ==========================================
-        # 🗂️ 【Layer 1.5：站點層級 Raw Data】
+        # 📉 【Layer 1.5：站點歷史趨勢與 Raw Data】
         # ==========================================
-        with st.expander(f"🗂️ View Station Level Raw Data ({selected_osat_op})", expanded=True):
-            # 🌟 修正：將標題獨立於 columns 之外
+        with st.expander(f"📉 View Station Trend & Raw Data ({selected_osat_op})", expanded=True):
+            
+            # 🔥 特效 5：加入 Station Level Trend Chart (永遠顯示歷史全貌)
+            st.markdown("#### 📈 Output Trend vs. Target Baseline")
+            
+            trend_df = df_station_all[df_station_all['站點'] == selected_osat_op].copy()
+            trend_df = trend_df.sort_values('日期', ascending=True)
+            trend_df['Target_Output'] = trend_df['開機數'] * ie_target_upd
+            
+            fig_trend = go.Figure()
+            # 實際產出
+            fig_trend.add_trace(go.Bar(
+                x=trend_df['日期'], 
+                y=trend_df['正測顆數'], 
+                name="Actual Output", 
+                marker_color='#38bdf8', 
+                text=trend_df['正測顆數'].apply(lambda x: f"{x:,.0f}"), 
+                textposition='auto',
+                hovertemplate='%{x}<br>Actual: %{y:,.0f} ea<extra></extra>'
+            ))
+            # 目標產線
+            fig_trend.add_trace(go.Scatter(
+                x=trend_df['日期'], 
+                y=trend_df['Target_Output'], 
+                name="Target Baseline", 
+                mode="lines+markers", 
+                line=dict(color='#f59e0b', width=3, dash='dash'),
+                hovertemplate='Target: %{y:,.0f} ea<extra></extra>'
+            ))
+            
+            fig_trend.update_layout(
+                height=320,
+                margin=dict(l=10, r=10, t=30, b=10),
+                hovermode="x unified",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                plot_bgcolor='rgba(255,255,255,1)',
+                yaxis=dict(gridcolor='#f1f5f9', title="Output Quantity (ea)"),
+                xaxis=dict(title="")
+            )
+            st.plotly_chart(fig_trend, use_container_width=True)
+            
+            st.markdown("---")
+            
+            # 以下為原本的 Raw Data 表格區
             st.markdown("#### 📋 Station Level Raw Data")
             
-            # 在標題下方建立兩個欄位放 Toggle 與說明文字
             col_tog, col_cap = st.columns([1.2, 4])
             with col_tog:
                 apply_date_filter = st.toggle(f"Filter by ({selected_date})", value=True)
@@ -1407,28 +1455,41 @@ with main_tabs[2]:
         # 🚨 【第二層：戰犯點名排行榜 (Who is the Killer?)】
         # ==========================================
         st.markdown("#### 🚨 Layer 2: Yield Killers Ranking (Top 3 Offenders)")
-        st.caption("Quickly identify which testers dragged down the daily performance.")
+        
+        # Pareto Impact Ratio
+        total_down_sum = rca_machine_df['Down'].sum()
+        if total_down_sum > 0:
+            top3_down_sum = rca_machine_df['Down'].sort_values(ascending=False).head(3).sum()
+            pareto_ratio = (top3_down_sum / total_down_sum) * 100
+            st.markdown(f"<div style='background-color: #fff7ed; padding: 10px 15px; border-left: 4px solid #f97316; border-radius: 4px; font-size: 14px; color: #9a3412; margin-bottom: 15px;'>💡 <b>Pareto Insight:</b> The Top 3 offenders account for <b>{pareto_ratio:.0f}%</b> of the station's total downtime today.</div>", unsafe_allow_html=True)
+        else:
+            st.caption("Quickly identify which testers dragged down the daily performance.")
         
         col_rw, col_dn, col_id = st.columns(3)
 
-        def make_top3_df(df, metric):
-            offenders = df[df[metric] > 0]
-            top3 = offenders[['機台代號', '正測顆數', metric]].sort_values(by=metric, ascending=False).head(3)
+        def make_top3_df(df, metric, base_upd):
+            offenders = df[df[metric] > 0].copy()
+            if offenders.empty:
+                return pd.DataFrame()
             
-            if not top3.empty:
-                top3[metric] = top3[metric].apply(lambda x: f"{x*100:.2f}%")
-                
+            # 計算等效損失
+            offenders['Max_Cap'] = offenders['開機數'] * base_upd
+            offenders['Est. Lost'] = (offenders['Max_Cap'] * offenders[metric]).apply(lambda x: f"-{x:,.0f} ea")
+            
+            top3 = offenders[['機台代號', '正測顆數', metric, 'Est. Lost']].sort_values(by=metric, ascending=False).head(3)
+            top3[metric] = top3[metric].apply(lambda x: f"{x*100:.2f}%")
+            
             return top3.rename(columns={'機台代號': 'Tester ID', '正測顆數': 'Total Qty', metric: f'{metric} %'})
 
         with col_rw:
             st.markdown("**💥 Top Rework**")
-            st.dataframe(make_top3_df(rca_machine_df, 'Rework'), use_container_width=True, hide_index=True)
+            st.dataframe(make_top3_df(rca_machine_df, 'Rework', ie_max_upd), use_container_width=True, hide_index=True)
         with col_dn:
             st.markdown("**🛑 Top Down**")
-            st.dataframe(make_top3_df(rca_machine_df, 'Down'), use_container_width=True, hide_index=True)
+            st.dataframe(make_top3_df(rca_machine_df, 'Down', ie_max_upd), use_container_width=True, hide_index=True)
         with col_id:
             st.markdown("**💤 Top Idle**")
-            st.dataframe(make_top3_df(rca_machine_df, 'Idle'), use_container_width=True, hide_index=True)
+            st.dataframe(make_top3_df(rca_machine_df, 'Idle', ie_max_upd), use_container_width=True, hide_index=True)
 
         st.write("")
         
@@ -1449,26 +1510,18 @@ with main_tabs[2]:
                 ]
                 valid_pct_cols = [c for c in rca_machine_df.columns if c in pct_cols_list]
                 
-                # 🌟 修復 ValueError：使用安全防護函數取代字串格式化，避免 NaN 或文字導致崩潰
                 def safe_pct(x):
-                    try:
-                        return f"{float(x):.2%}" if pd.notnull(x) else "-"
-                    except:
-                        return str(x)
+                    try: return f"{float(x):.2%}" if pd.notnull(x) else "-"
+                    except: return str(x)
                         
                 def safe_int(x):
-                    try:
-                        return f"{float(x):,.0f}" if pd.notnull(x) else "-"
-                    except:
-                        return str(x)
+                    try: return f"{float(x):,.0f}" if pd.notnull(x) else "-"
+                    except: return str(x)
                         
                 def safe_float(x):
-                    try:
-                        return f"{float(x):.2f}" if pd.notnull(x) else "-"
-                    except:
-                        return str(x)
+                    try: return f"{float(x):.2f}" if pd.notnull(x) else "-"
+                    except: return str(x)
                 
-                # 套用安全函數
                 format_dict = {col: safe_pct for col in valid_pct_cols}
                 
                 int_cols = ['正測顆數', '測試顆數', '產出良品數', '生產時間']
@@ -1479,7 +1532,6 @@ with main_tabs[2]:
                 if '開機數' in rca_machine_df.columns:
                     format_dict['開機數'] = safe_float
                 
-                # 高亮標記函數
                 def highlight_red(val):
                     if isinstance(val, (int, float)) and val > 0.05:
                         return 'background-color: #fee2e2; color: #991b1b; font-weight: bold;'
@@ -1490,7 +1542,6 @@ with main_tabs[2]:
                         return 'background-color: #ffedd5; color: #9a3412; font-weight: bold;'
                     return ''
                 
-                # 渲染 Styler
                 styled_raw_df = rca_machine_df.style.format(format_dict)
                 
                 if hasattr(styled_raw_df, "map"):
