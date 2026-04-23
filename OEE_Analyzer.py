@@ -1500,7 +1500,7 @@ with main_tabs[2]:
         st.write("")
         
         # 建立兩個 Expander 收納不同的 Raw Data
-        with st.expander(f"📋 Station Level Raw Data ({selected_osat_op})", expanded=False):
+        with st.expander(f"📋 Station Level Raw Data ({selected_osat_op})", expanded=True):
             
             if ev_date_toggle:
                 display_station_df = df_station_all[(df_station_all['站點'] == selected_osat_op) & (df_station_all['日期'] == selected_date)].copy()
