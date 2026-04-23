@@ -1369,7 +1369,8 @@ with main_tabs[2]:
             trend_df['Target_Output'] = trend_df['開機數'] * ie_target_upd
             
             fig_trend = go.Figure()
-            # 實際產出
+            
+            # 1. 實際產出 (主 Y 軸 - 左側)
             fig_trend.add_trace(go.Bar(
                 x=trend_df['日期'], 
                 y=trend_df['正測顆數'], 
@@ -1377,9 +1378,10 @@ with main_tabs[2]:
                 marker_color='#38bdf8', 
                 text=trend_df['正測顆數'].apply(lambda x: f"{x:,.0f}"), 
                 textposition='auto',
-                hovertemplate='%{x}<br>Actual: %{y:,.0f} ea<extra></extra>'
+                hovertemplate='Actual: %{y:,.0f} ea<extra></extra>'
             ))
-            # 目標產線
+            
+            # 2. 目標產線 (主 Y 軸 - 左側)
             fig_trend.add_trace(go.Scatter(
                 x=trend_df['日期'], 
                 y=trend_df['Target_Output'], 
@@ -1389,13 +1391,37 @@ with main_tabs[2]:
                 hovertemplate='Target: %{y:,.0f} ea<extra></extra>'
             ))
             
+            # 🌟 3. 新增：開機數 (副 Y 軸 - 右側)
+            fig_trend.add_trace(go.Scatter(
+                x=trend_df['日期'], 
+                y=trend_df['開機數'], 
+                name="Active Testers", 
+                mode="lines+markers", 
+                line=dict(color='#94a3b8', width=2), # 低調的灰藍色
+                marker=dict(symbol='square'),
+                yaxis='y2', # 告訴 Plotly 這條線要對應右邊的副 Y 軸
+                hovertemplate='Testers: %{y:.2f} eq<extra></extra>'
+            ))
+            
             fig_trend.update_layout(
-                height=320,
+                height=350,
                 margin=dict(l=10, r=10, t=30, b=10),
                 hovermode="x unified",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                 plot_bgcolor='rgba(255,255,255,1)',
-                yaxis=dict(gridcolor='#f1f5f9', title="Output Quantity (ea)"),
+                yaxis=dict(
+                    title="Output Quantity (ea)", 
+                    gridcolor='#f1f5f9',
+                    rangemode='tozero' # 強制從 0 開始
+                ),
+                # 🌟 新增副 Y 軸設定
+                yaxis2=dict(
+                    title="Active Testers (eq)",
+                    overlaying='y',
+                    side='right',
+                    showgrid=False,
+                    rangemode='tozero' # 強制從 0 開始，視覺比例才會正確
+                ),
                 xaxis=dict(title="")
             )
             st.plotly_chart(fig_trend, use_container_width=True)
