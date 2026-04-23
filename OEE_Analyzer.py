@@ -1361,7 +1361,7 @@ with main_tabs[2]:
         # ==========================================
         with st.expander(f"📉 View Station Trend & Raw Data ({selected_osat_op})", expanded=True):
             
-            # 🔥 特效 5：加入 Station Level Trend Chart (永遠顯示歷史全貌)
+            # Station Level Trend Chart (永遠顯示歷史全貌)
             st.markdown("#### 📈 Output Trend vs. Target Baseline")
             
             trend_df = df_station_all[df_station_all['站點'] == selected_osat_op].copy()
@@ -1402,7 +1402,7 @@ with main_tabs[2]:
             
             st.markdown("---")
             
-            # 以下為原本的 Raw Data 表格區
+            # 📋 Station Raw Data 表格區
             st.markdown("#### 📋 Station Level Raw Data")
             
             col_tog, col_cap = st.columns([1.2, 4])
@@ -1467,29 +1467,25 @@ with main_tabs[2]:
         
         col_rw, col_dn, col_id = st.columns(3)
 
-        def make_top3_df(df, metric, base_upd):
-            offenders = df[df[metric] > 0].copy()
-            if offenders.empty:
-                return pd.DataFrame()
+        # 排行榜產生器：已移除 Est. Lost 功能
+        def make_top3_df(df, metric):
+            offenders = df[df[metric] > 0]
+            top3 = offenders[['機台代號', '正測顆數', metric]].sort_values(by=metric, ascending=False).head(3)
             
-            # 計算等效損失
-            offenders['Max_Cap'] = offenders['開機數'] * base_upd
-            offenders['Est. Lost'] = (offenders['Max_Cap'] * offenders[metric]).apply(lambda x: f"-{x:,.0f} ea")
-            
-            top3 = offenders[['機台代號', '正測顆數', metric, 'Est. Lost']].sort_values(by=metric, ascending=False).head(3)
-            top3[metric] = top3[metric].apply(lambda x: f"{x*100:.2f}%")
-            
+            if not top3.empty:
+                top3[metric] = top3[metric].apply(lambda x: f"{x*100:.2f}%")
+                
             return top3.rename(columns={'機台代號': 'Tester ID', '正測顆數': 'Total Qty', metric: f'{metric} %'})
 
         with col_rw:
             st.markdown("**💥 Top Rework**")
-            st.dataframe(make_top3_df(rca_machine_df, 'Rework', ie_max_upd), use_container_width=True, hide_index=True)
+            st.dataframe(make_top3_df(rca_machine_df, 'Rework'), use_container_width=True, hide_index=True)
         with col_dn:
             st.markdown("**🛑 Top Down**")
-            st.dataframe(make_top3_df(rca_machine_df, 'Down', ie_max_upd), use_container_width=True, hide_index=True)
+            st.dataframe(make_top3_df(rca_machine_df, 'Down'), use_container_width=True, hide_index=True)
         with col_id:
             st.markdown("**💤 Top Idle**")
-            st.dataframe(make_top3_df(rca_machine_df, 'Idle', ie_max_upd), use_container_width=True, hide_index=True)
+            st.dataframe(make_top3_df(rca_machine_df, 'Idle'), use_container_width=True, hide_index=True)
 
         st.write("")
         
