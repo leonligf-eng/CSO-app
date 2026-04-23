@@ -1077,16 +1077,24 @@ with main_tabs[0]:
     else:
         curr_min_date, curr_max_date = global_min_date, global_max_date
 
+    # ==========================================================
+    # 🌟 核心改動：動態計算「近一週」起始日 (防呆：若不滿一週則取最早日期)
+    # ==========================================================
+    target_start = curr_max_date - timedelta(days=7)
+    default_start = max(curr_min_date, target_start)
+
     st.session_state.curr_max_date_ref = curr_max_date
     st.session_state.curr_min_date_ref = curr_min_date
 
     curr_selection_hash = hash(str(selected_ops) + str(selected_progs))
     if "last_selection_hash" not in st.session_state or st.session_state.last_selection_hash != curr_selection_hash:
-        st.session_state.date_picker = (curr_min_date, curr_max_date)
+        # 當切換 Operation 或 Program 時，日期自動吸附回「近一週」
+        st.session_state.date_picker = (default_start, curr_max_date)
         st.session_state.last_selection_hash = curr_selection_hash
 
     if "date_picker" not in st.session_state:
-        st.session_state.date_picker = (curr_min_date, curr_max_date)
+        # 初次載入網頁時的預設值
+        st.session_state.date_picker = (default_start, curr_max_date)
 
     def update_date_range(days=None, to_max=False):
         val = st.session_state.date_picker
