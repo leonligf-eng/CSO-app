@@ -374,164 +374,162 @@ def load_osat_data(file_bytes):
 # ==============================================================================
 # --- 🌟 單機 1440 分鐘時間還原推疊圖 (加入 Context-Aware X 軸魔法) ---
 # ==============================================================================
-# ==============================================================================
-# --- 🎨 Function: 繪製 1440 分鐘單機時間還原圖 (含動態戰犯標記) ---
-# ==============================================================================
-def render_rca_drilldown(rca_df):
+def render_rca_drilldown(df_machine):
     """
-    繪製機台 1440 分鐘時間分配推疊圖，並加入智能「榜首標籤(Top Offender Annotations)」引導視線。
+    繪製單機 1440 分鐘時間還原推疊圖 (SEMI E10 架構)
+    df_machine: 傳入當天的所有實體機台明細 (無站點過濾)
     """
-    if rca_df.empty:
-        return
-        
-    st.markdown("##### 🔬 Physical Tester 1440-Minute Time Allocation")
+    st.markdown("#### 🔬 Physical Tester 1440-Minute Time Allocation")
     
-    st.markdown("""
-        <div style='background-color: #f8fafc; padding: 12px 16px; border-left: 4px solid #3b82f6; border-radius: 4px; font-size: 13px; color: #1e293b; margin-bottom: 20px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);'>
-            💡 <b>Context Aware (Physical View):</b> In NPI or capacity constraint scenarios, testers may run multiple stations. This chart shows the <b>entire 1440-minute day for ALL active testers in the equipment group</b>. Compare the <code>Output Qty</code> appended to the machine name to deduce its primary station (e.g., high qty = FT2/FTA, low qty = FT1).
-        </div>
-    """, unsafe_allow_html=True)
+    # 💡 核心改動：加入明確的 NPI/MP 混線提示，引導工程師正確判讀
+    st.info("💡 **Context Aware (Physical View):** In NPI or capacity constraint scenarios, testers may run multiple stations. This chart shows the **entire 1440-minute day for ALL active testers in the equipment group**. Compare the `Output Qty` appended to the machine name to deduce its primary station (e.g., high qty = FT2/FTA, low qty = FT1).")
     
-    st.markdown("**SEMI E10 Standard: 1440-Minute Tester Utilization**")
+    # 建立一個乾淨的 DataFrame 來做計算，避免污染原始資料
+    df_calc = df_machine.copy()
     
-    # 確保資料按機台代號排序
-    plot_df = rca_df.sort_values(by='機台代號').copy()
-    
-    # 準備 X 軸標籤 (Machine ID + 總產出)
-    x_labels = [f"{row['機台代號']}<br>(Qty: {row['正測顆數']:,})" for _, row in plot_df.iterrows()]
-    
-    # 1. 將所有百分比欄位轉換為分鐘 (總時間 1440 分鐘)
-    pct_cols = ['Run', 'SetUp', 'Down', 'Other', 'Idle']
-    mins_df = plot_df[['機台代號', '正測顆數']].copy()
-    
-    # 計算各狀態分鐘數
-    for col in pct_cols:
-        mins_df[col] = plot_df[col] * 1440
-        
-    # 計算未排程時間 (Unscheduled) = 1440 - E% 所耗費的時間
-    # 假設 E% 代表機台在產線上的有效配置比例 (例如 E% = 50%，代表這台機台今天只有 720 分鐘是被排給 OSAT 生產的)
-    mins_df['Unscheduled'] = 1440 - (plot_df['E%'] * 1440)
-    # 防呆：確保所有時間加總不超過 1440
-    mins_df['Unscheduled'] = mins_df['Unscheduled'].apply(lambda x: max(0, x))
-
     # ==========================================
     # 🕵️‍♂️ 智能分析：尋找三大戰犯榜首 (Top 1)
     # ==========================================
-    offenders_map = {} # Key: 機台代號, Value: list of labels
+    offenders_map = {} # Key: 機台代號, Value: list of emojis
     
-    # 找 Top 1 Rework
-    if (plot_df['Rework'] > 0).any():
-        top_rework_id = plot_df.loc[plot_df['Rework'].idxmax(), '機台代號']
-        offenders_map.setdefault(top_rework_id, []).append("💥 Top Rework")
+    # 找 Top 1 Rework (用 Other 代表，因為 OSAT 的 Rework 通常歸在 Other)
+    if 'Rework' in df_calc.columns and (df_calc['Rework'].apply(lambda x: float(str(x).strip('%')) if isinstance(x, str) else x) > 0).any():
+        # 找出 Rework 最高的那台
+        temp_rw = df_calc['Rework'].apply(lambda x: float(str(x).strip('%')) if isinstance(x, str) else x)
+        top_rework_id = df_calc.loc[temp_rw.idxmax(), '機台代號']
+        offenders_map.setdefault(top_rework_id, []).append("💥") # Rework = 爆炸
         
     # 找 Top 1 Down
-    if (plot_df['Down'] > 0).any():
-        top_down_id = plot_df.loc[plot_df['Down'].idxmax(), '機台代號']
-        offenders_map.setdefault(top_down_id, []).append("🛑 Top Down")
+    if 'Down' in df_calc.columns and (df_calc['Down'].apply(lambda x: float(str(x).strip('%')) if isinstance(x, str) else x) > 0).any():
+        temp_dn = df_calc['Down'].apply(lambda x: float(str(x).strip('%')) if isinstance(x, str) else x)
+        top_down_id = df_calc.loc[temp_dn.idxmax(), '機台代號']
+        offenders_map.setdefault(top_down_id, []).append("🛑") # Down = 停止標誌
         
     # 找 Top 1 Idle
-    if (plot_df['Idle'] > 0).any():
-        top_idle_id = plot_df.loc[plot_df['Idle'].idxmax(), '機台代號']
-        offenders_map.setdefault(top_idle_id, []).append("💤 Top Idle")
-
-    # 建立 Plotly 堆疊柱狀圖
-    fig = go.Figure()
+    if 'Idle' in df_calc.columns and (df_calc['Idle'].apply(lambda x: float(str(x).strip('%')) if isinstance(x, str) else x) > 0).any():
+        temp_id = df_calc['Idle'].apply(lambda x: float(str(x).strip('%')) if isinstance(x, str) else x)
+        top_idle_id = df_calc.loc[temp_id.idxmax(), '機台代號']
+        offenders_map.setdefault(top_idle_id, []).append("💤") # Idle = 睡覺
     
-    # 顏色定義 (參考 SEMI E10 精神)
-    colors = {
-        'Run': '#7cb342',        # 綠色 (生產中)
-        'SetUp': '#eeb24b',      # 橘黃色 (架機/設定)
-        'Down': '#c95e51',       # 紅色 (機台異常/當機)
-        'Other': '#8e5ea2',      # 紫色 (其他/包含 Rework)
-        'Idle': '#95a5a6',       # 灰色 (閒置/待料)
-        'Unscheduled': 'rgba(255,255,255,0)' # 透明 (未排程，僅畫邊框)
-    }
+    # ==========================================
+    
+    # 1. 確保數值格式正確 (處理百分比字串轉換為小數)
+    def clean_pct(val):
+        if pd.isna(val): return 0.0
+        if isinstance(val, str): 
+            return float(val.replace('%', '').strip()) / 100.0
+        return float(val)
 
-    # 依序推疊柱子 (從底到頂)
-    states = ['Run', 'SetUp', 'Down', 'Other', 'Idle']
-    for state in states:
-        fig.add_trace(go.Bar(
-            x=x_labels,
-            y=mins_df[state],
-            name=state,
-            marker_color=colors[state],
-            hovertemplate=f"<b>%{{x}}</b><br>{state}: %{{y:.0f}} mins<extra></extra>",
-            # 只有 Run 顯示文字標籤，保持圖面乾淨
-            text=mins_df[state].apply(lambda x: f"{x:.0f}" if x > 120 else ""), 
-            textposition='inside',
-            insidetextanchor='start'
-        ))
+    cols_to_clean = ['Run', 'SetUp', 'Down', 'Idle', 'Other', 'Rework', 'Clean', 'Corr', 'PM', 'E1', 'E2']
+    for col in cols_to_clean:
+        if col in df_calc.columns:
+            df_calc[col] = df_calc[col].apply(clean_pct)
+        else:
+            df_calc[col] = 0.0 # 若無此欄位則補零
+
+    # OSAT 報表的生產時間原本就是分鐘
+    df_calc['生產時間'] = df_calc['生產時間'].astype(float)
+    
+    # ==========================================
+    # 🌟 核心演算法：俄羅斯娃娃 1440 分鐘模型還原
+    # ==========================================
+    # 第一層：生產時間 (分鐘)
+    df_calc['Prod_Mins'] = df_calc['生產時間']
+    
+    # 第二層：未安排生產時間 (Unscheduled Time)
+    df_calc['Unscheduled_Mins'] = 1440.0 - df_calc['Prod_Mins']
+    df_calc['Unscheduled_Mins'] = df_calc['Unscheduled_Mins'].apply(lambda x: max(0, x)) # 防呆，避免負數
+    
+    # 第三層：閒置時間 (Idle)
+    df_calc['Idle_Mins'] = df_calc['Prod_Mins'] * df_calc['Idle']
+    
+    # 第四層：真實運作時間 (Active Time)
+    df_calc['Active_Mins'] = df_calc['Prod_Mins'] - df_calc['Idle_Mins']
+    
+    # 展開變因 (乘上真實運作時間)
+    df_calc['Run_Mins'] = df_calc['Active_Mins'] * df_calc['Run']
+    df_calc['Setup_Mins'] = df_calc['Active_Mins'] * df_calc['SetUp']
+    df_calc['Down_Mins'] = df_calc['Active_Mins'] * df_calc['Down']
+    
+    # 其他所有運作狀態加總 (Other, PM, Rework 等)
+    df_calc['Other_Active_Mins'] = df_calc['Active_Mins'] - (df_calc['Run_Mins'] + df_calc['Setup_Mins'] + df_calc['Down_Mins'])
+    df_calc['Other_Active_Mins'] = df_calc['Other_Active_Mins'].apply(lambda x: max(0, x))
+
+    # 🧹 數值格式化：四捨五入至小數點後第一位
+    for col in ['Unscheduled_Mins', 'Idle_Mins', 'Run_Mins', 'Setup_Mins', 'Down_Mins', 'Other_Active_Mins']:
+        df_calc[col] = df_calc[col].round(1)
+
+    # ==========================================
+    # 🌟 視覺魔法 (升級版)：將「戰犯 Emoji」加入 X 軸標籤
+    # ==========================================
+    def create_x_label(row):
+        m_id = row['機台代號']
         
-    # 加入 Unscheduled (以透明底+灰色邊框呈現)
+        # 如果這台機台是戰犯，把 Emoji 加上去
+        prefix = ""
+        if m_id in offenders_map:
+            prefix = "".join(offenders_map[m_id]) + " "
+            
+        qty_str = ""
+        if '正測顆數' in df_calc.columns:
+            qty_str = f"<br>(Qty: {row['正測顆數']:,.0f})"
+            
+        return f"{prefix}<b>{m_id}</b>{qty_str}"
+
+    df_calc['X_Label'] = df_calc.apply(create_x_label, axis=1)
+    # ==========================================
+
+    fig = go.Figure()
+
+    # 🟢 1. Value Adding (Run)
     fig.add_trace(go.Bar(
-        x=x_labels,
-        y=mins_df['Unscheduled'],
-        name='Unscheduled',
-        marker=dict(
-            color=colors['Unscheduled'],
-            line=dict(color='#cbd5e1', width=1)
-        ),
-        hovertemplate="<b>%{x}</b><br>Unscheduled: %{y:.0f} mins<extra></extra>",
-        showlegend=True
+        name='Run', x=df_calc['X_Label'], y=df_calc['Run_Mins'], 
+        marker_color='#5CB85C', text=df_calc['Run_Mins'].round(0), hoverinfo='x+name+y'
+    ))
+    # 🟡 2. Process Loss (Setup)
+    fig.add_trace(go.Bar(
+        name='Setup', x=df_calc['X_Label'], y=df_calc['Setup_Mins'], 
+        marker_color='#F0AD4E', hoverinfo='x+name+y'
+    ))
+    # 🔴 3. Equipment Loss (Down)
+    fig.add_trace(go.Bar(
+        name='Down', x=df_calc['X_Label'], y=df_calc['Down_Mins'], 
+        marker_color='#D9534F', hoverinfo='x+name+y'
+    ))
+    # 🟣 4. Other Active (PM, Rework...)
+    fig.add_trace(go.Bar(
+        name='Other', x=df_calc['X_Label'], y=df_calc['Other_Active_Mins'], 
+        marker_color='#9B59B6', hoverinfo='x+name+y'
+    ))
+    # 🌫️ 5. Starvation (Idle)
+    fig.add_trace(go.Bar(
+        name='Idle', x=df_calc['X_Label'], y=df_calc['Idle_Mins'], 
+        marker_color='#95A5A6', hoverinfo='x+name+y'
+    ))
+    # ⬜ 6. Unscheduled Time (未安排生產/黑洞)
+    fig.add_trace(go.Bar(
+        name='Unscheduled', x=df_calc['X_Label'], y=df_calc['Unscheduled_Mins'], 
+        marker_color='rgba(236, 240, 241, 0.5)',  
+        marker_line_color='#BDC3C7', marker_line_width=1.5, hoverinfo='x+name+y'
     ))
 
-    # ==========================================
-    # 🏷️ 將「戰犯標籤」貼上圖表
-    # ==========================================
-    for i, row in mins_df.iterrows():
-        m_id = row['機台代號']
-        if m_id in offenders_map:
-            # 該機台的標籤 (合併可能的多重身分，例如 "🛑 Top Down & 💥 Top Rework")
-            label_text = " & ".join(offenders_map[m_id])
-            
-            # 對應的 X 軸名稱
-            x_pos = f"{m_id}<br>(Qty: {row['正測顆數']:,})"
-            
-            fig.add_annotation(
-                x=x_pos,
-                y=1440, # 標籤貼在 1440 分鐘的頂部
-                text=f"<b>{label_text}</b>",
-                showarrow=True,
-                arrowhead=2,
-                arrowsize=1.5,
-                arrowwidth=2,
-                arrowcolor="#475569",
-                ax=0,
-                ay=-35, # 箭頭長度，將文字往上推
-                font=dict(size=11, color="#1e293b"),
-                bgcolor="white",
-                bordercolor="#cbd5e1",
-                borderwidth=1,
-                borderpad=4,
-                hovertext="Flagged from Layer 2 Analysis"
-            )
-
-    # 圖表排版設定
     fig.update_layout(
         barmode='stack',
-        height=450, # 稍微增加高度以容納上方標籤
-        margin=dict(l=10, r=10, t=50, b=80), # 頂部留出空間給 Annotation
-        plot_bgcolor='rgba(0,0,0,0)',
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.05,
-            xanchor="right",
-            x=1
-        ),
+        title='SEMI E10 Standard: 1440-Minute Tester Utilization',
         yaxis=dict(
-            title="Minutes (mins)",
-            range=[0, 1600], # Y軸稍微拉高，避免標籤被切斷
-            tickmode='linear',
-            tick0=0,
-            dtick=120,
-            gridcolor='#e2e8f0'
-        ),
-        xaxis=dict(
-            title="Machine ID (with Total Output)",
-            tickangle=-45 # 標籤傾斜避免重疊
-        )
+            title='Minutes (mins)', 
+            range=[0, 1440], 
+            dtick=120 
+        ), 
+        xaxis=dict(title='Machine ID (with Total Output)', tickangle=-45),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        plot_bgcolor='white',
+        hovermode="x unified",
+        hoverlabel=dict(namelength=-1) 
     )
+    
+    # 加上網格線方便對齊
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
 
     st.plotly_chart(fig, use_container_width=True)
 
