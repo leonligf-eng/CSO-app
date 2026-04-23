@@ -1077,26 +1077,20 @@ with main_tabs[0]:
     else:
         curr_min_date, curr_max_date = global_min_date, global_max_date
 
-    # ==========================================================
-    # 🌟 核心改動：動態計算「近一週」起始日 (防呆：若不滿一週則取最早日期)
-    # ==========================================================
-    target_start = curr_max_date - timedelta(days=7)
-    default_start = max(curr_min_date, target_start)
-
-    st.session_state.curr_max_date_ref = curr_max_date
+    st.session_state.curr_max_date_ref =st.session_state.curr_max_date_ref = curr_max_date
     st.session_state.curr_min_date_ref = curr_min_date
 
+    # 恢復原本的邏輯：預設選取最大區間 (Min to Max)
     curr_selection_hash = hash(str(selected_ops) + str(selected_progs))
     if "last_selection_hash" not in st.session_state or st.session_state.last_selection_hash != curr_selection_hash:
-        # 當切換 Operation 或 Program 時，日期自動吸附回「近一週」
-        st.session_state.date_picker = (default_start, curr_max_date)
+        st.session_state.date_picker = (curr_min_date, curr_max_date)
         st.session_state.last_selection_hash = curr_selection_hash
 
     if "date_picker" not in st.session_state:
-        # 初次載入網頁時的預設值
-        st.session_state.date_picker = (default_start, curr_max_date)
+        st.session_state.date_picker = (curr_min_date, curr_max_date)
 
-    def update_date_range(days=None, to_max=False):
+    # 🌟 核心修改：新增 recent_days 參數，並順手優化 to_max 邏輯
+    def update_date_range(days=None, to_max=False, recent_days=False):
         val = st.session_state.date_picker
         if isinstance(val, tuple) and len(val) > 0:
             start_dt = val[0]
@@ -1108,7 +1102,13 @@ with main_tabs[0]:
             start_dt = val
             
         if to_max:
+            # 優化：點擊 Max Range 時，把起點也重置回最早日期
+            start_dt = st.session_state.curr_min_date_ref
             new_end = st.session_state.curr_max_date_ref
+        elif recent_days:
+            # 🌟 新增邏輯：終點定錨在最新日期，起點往前推 7 天
+            new_end = st.session_state.curr_max_date_ref
+            start_dt = max(st.session_state.curr_min_date_ref, new_end - timedelta(days=7))
         else:
             new_end = min(start_dt + timedelta(days=days), st.session_state.curr_max_date_ref)
             
@@ -1139,8 +1139,11 @@ with main_tabs[0]:
             start_date = end_date = date_range
 
         st.markdown("<div style='margin-top: 5px;'></div>", unsafe_allow_html=True)
-        c_btn1, c_btn2, c_btn3, c_btn4 = st.columns(4)
         
+        # 🌟 核心修改：切分成 5 個按鈕，加入 Last 7 Days
+        c_btn0, c_btn1, c_btn2, c_btn3, c_btn4 = st.columns(5)
+        
+        c_btn0.button("Last 7 Days", use_container_width=True, on_click=update_date_range, kwargs={"recent_days": True})
         c_btn1.button("+ 1 Week", use_container_width=True, on_click=update_date_range, kwargs={"days": 7})
         c_btn2.button("+ 2 Weeks", use_container_width=True, on_click=update_date_range, kwargs={"days": 14})
         c_btn3.button("+ 4 Weeks", use_container_width=True, on_click=update_date_range, kwargs={"days": 28})
