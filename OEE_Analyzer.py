@@ -654,19 +654,6 @@ with main_tabs[1]:
         if "just_imported" not in st.session_state:
             st.session_state.just_imported = False
 
-        # =========================================================
-        # 🌟 新增：MP 時間切片與防爆表格設定區
-        # =========================================================
-        with st.expander("📅 MP Time-Slicing & Rolling Window Settings", expanded=True):
-            st.markdown("<p style='font-size: 13px; color: #666;'>Configure how Mass Production (MP) data is sliced by month and accumulated.</p>", unsafe_allow_html=True)
-            m_col1, m_col2, m_col3 = st.columns([1.5, 1, 2])
-            with m_col1:
-                mp_anchor_date = st.date_input("1. MP/PVT Start Date (Anchor)", value=global_min_date)
-            with m_col2:
-                mp_cutoff_day = st.number_input("2. Monthly Cut-off Day", min_value=1, max_value=31, value=25)
-            with m_col3:
-                mp_display_count = st.slider("3. Show Recent MP Months (Rolling Window)", min_value=1, max_value=24, value=6, help="Limit columns to prevent horizontal overload.")
-
         with st.expander("📥 Import Saved Mapping Configuration", expanded=False):
             st.markdown("<p style='font-size: 13px; color: #666;'>Upload a previously exported mapping CSV file to restore your program classifications instantly.</p>", unsafe_allow_html=True)
             
@@ -710,7 +697,7 @@ with main_tabs[1]:
                 except Exception as e:
                     st.error(f"Error reading file: {e}")
 
-        with st.expander("⚙️ Build Phase Mapping Configuration (Interactive Binning)", expanded=True):
+        with st.expander("⚙️ Build Phase Mapping Configuration (Interactive Binning)", expanded=False):
             st.markdown("<p style='font-size: 14px; color: #555;'>Assign programs to their corresponding Build Phases. Use the filter below to classify programs operation by operation.</p>", unsafe_allow_html=True)
             
             def on_op_radio_change():
@@ -849,18 +836,60 @@ with main_tabs[1]:
                 st.error("Critical limits must be lower than Healthy limits.")
 
         # ==============================================================================
-        # --- 🌟 大一統矩陣運算引擎 (CUM 累加與 Time-Slicing) ---
+        # --- 🌟 大一統矩陣運算引擎前置 (準備工作與智慧錨點) ---
         # ==============================================================================
         prog_to_build = {p: phase for phase, progs in st.session_state.master_mapping.items() for p in progs}
         build_df = clean_build_df.copy()
         build_df['Base_Phase'] = build_df['ProgramName'].map(prog_to_build)
         build_df = build_df.dropna(subset=['Base_Phase'])
         
+        # 🌟 智慧錨點 (Smart Anchor): 自動捕捉 MP 程式的第一筆進站時間
+        mp_only_df = build_df[build_df['Base_Phase'] == 'MP']
+        if not mp_only_df.empty:
+            auto_mp_anchor = mp_only_df['CheckInTime'].min().date()
+        else:
+            auto_mp_anchor = global_min_date
+
         if build_df.empty:
             st.info("💡 Please assign at least one program to a Build Phase above to generate the Matrix Report.")
         else:
-            st.markdown("#### 📊 Comprehensive Build Evolution Matrix (MP CUM Yield)")
+            # =========================================================
+            # 🌟 新增：MP 時間切片與防爆表格設定區 (移至下方)
+            # =========================================================
+            def get_mp_slice(dt, anchor, cutoff):
+                if pd.isna(dt): return "MP+0M"
+                check_date = dt.date()
+                if check_date < anchor: return "MP+0M"
+                diff_months = (check_date.year - anchor.year) * 12 + (check_date.month - anchor.month)
+                if check_date.day >= cutoff:
+                    diff_months += 1
+                return f"MP+{max(0, diff_months)}M"
+
+            # 預先計算所有可能的 MP 月份，供下拉選單使用
+            temp_phases = build_df.apply(
+                lambda x: get_mp_slice(x['CheckOutTime'], auto_mp_anchor, 25) if x['Base_Phase'] == "MP" else x['Base_Phase'], 
+                axis=1
+            )
+            all_possible_mp = sorted([p for p in temp_phases.unique() if "MP+" in str(p)], key=lambda x: int(x.replace("MP+", "").replace("M", "")))
             
+            with st.expander("📅 MP Time-Slicing & Rolling Window Settings", expanded=True):
+                st.markdown("<p style='font-size: 13px; color: #666;'>Configure how Mass Production (MP) data is sliced by month and accumulated.</p>", unsafe_allow_html=True)
+                m_col1, m_col2, m_col3 = st.columns([1.5, 1, 2])
+                with m_col1:
+                    mp_anchor_date = st.date_input("1. MP Start Date (Anchor)", value=auto_mp_anchor)
+                with m_col2:
+                    mp_cutoff_day = st.number_input("2. Monthly Cut-off Day", min_value=1, max_value=31, value=25)
+                with m_col3:
+                    default_visible = all_possible_mp[-6:] if len(all_possible_mp) > 6 else all_possible_mp
+                    selected_mp_phases = st.multiselect(
+                        "3. Select Visible MP Columns", 
+                        options=all_possible_mp, 
+                        default=default_visible,
+                        help="Choose exactly which MP months to display. The calculation runs correctly in the background regardless of visibility."
+                    )
+            
+            st.markdown("#### 📊 Comprehensive Build Evolution Matrix (MP CUM Yield)")
+
             # --- 排序權重函數 ---
             def get_op_sort_weight(op_name):
                 op_upper = op_name.upper()
@@ -870,35 +899,33 @@ with main_tabs[1]:
                 if "LS" in op_upper: return 4
                 return 99
             
-            # --- 🌟 執行 MP 切片邏輯 ---
-            def get_mp_slice(dt, anchor, cutoff):
-                if pd.isna(dt): return "MP+0M"
-                check_date = dt.date()
-                if check_date < anchor: return "MP+0M"
-                diff_months = (check_date.year - anchor.year) * 12 + (check_date.month - anchor.month)
-                if check_date.day >= cutoff:
-                    diff_months += 1
-                return f"MP+{max(0, diff_months)}M"
-                
+            build_df['Op_Weight'] = build_df['OpNo'].apply(get_op_sort_weight)
+            
+            # 正式應用切片規則
             build_df['Final_Phase'] = build_df.apply(
                 lambda x: get_mp_slice(x['CheckOutTime'], mp_anchor_date, mp_cutoff_day) if x['Base_Phase'] == "MP" else x['Base_Phase'], 
                 axis=1
             )
-            
-            # 決定呈現欄位 (NPI 固定呈現 + MP 滾動視窗)
+
             npi_phases = [p for p in build_phases if p != "MP"]
-            all_mp_phases = sorted([p for p in build_df['Final_Phase'].unique() if "MP+" in str(p)], 
-                                   key=lambda x: int(x.replace("MP+", "").replace("M", "")))
             
-            visible_mp_phases = all_mp_phases[-mp_display_count:] if all_mp_phases else []
+            # 建立完整的 MP 鏈條，確保 CUM 完美繼承
+            all_mp_phases_raw = sorted([p for p in build_df['Final_Phase'].unique() if "MP+" in str(p)], key=lambda x: int(x.replace("MP+", "").replace("M", "")))
+            if all_mp_phases_raw:
+                max_m = int(all_mp_phases_raw[-1].replace("MP+", "").replace("M", ""))
+                mp_chain = [f"MP+{i}M" for i in range(max_m + 1)]
+            else:
+                mp_chain = []
+            
+            visible_mp_phases = sorted(selected_mp_phases, key=lambda x: int(x.replace("MP+", "").replace("M", "")))
             ordered_phases = npi_phases + visible_mp_phases
-            
-            # --- 🌟 計算 MP 累積加總 (CUM) ---
+
+            # 基礎聚合
             base_agg = build_df.groupby(['OpNo', 'Final_Phase']).agg(
                 TestQty=('TestQty', 'sum'),
-                PassQty=('PassQty', 'sum'),
                 TestInQty=('TestInQty', 'sum'),
                 TestOutQty=('TestOutQty', 'sum'),
+                PassQty=('PassQty', 'sum'),
                 FailQty=('FailQty', 'sum')
             ).reset_index()
 
@@ -906,18 +933,18 @@ with main_tabs[1]:
             for op in base_agg['OpNo'].unique():
                 op_data = base_agg[base_agg['OpNo'] == op]
                 
-                # NPI 階段直接取用
+                # NPI (Discrete)
                 for p in npi_phases:
                     row = op_data[op_data['Final_Phase'] == p]
                     if not row.empty:
                         d = row.iloc[0].to_dict()
-                        d['Build_Phase'] = p # 統一對接後方變數名稱
+                        d['Build_Phase'] = p 
                         d['Op_Weight'] = get_op_sort_weight(op)
                         cum_records.append(d)
                 
-                # MP 階段按照時間疊加
+                # MP (CUM)
                 cum_t = cum_p = cum_in = cum_out = cum_f = 0
-                for p in all_mp_phases:
+                for p in mp_chain:
                     row = op_data[op_data['Final_Phase'] == p]
                     if not row.empty:
                         cum_t += row.iloc[0]['TestQty']
@@ -940,7 +967,7 @@ with main_tabs[1]:
                 # --- 分類資料 ---
                 ft_df = final_cum_df[~final_cum_df['OpNo'].str.contains('LS', case=False, na=False)].copy()
                 ls_df = final_cum_df[final_cum_df['OpNo'].str.contains('LS', case=False, na=False)].copy()
-                
+
                 # 動態背景色判定
                 def get_bg_color(val, g_thresh, r_thresh):
                     if pd.isna(val): return ''
@@ -953,23 +980,24 @@ with main_tabs[1]:
                     if pd.isna(val): return '#334155'
                     return '#991b1b' if val < r_thresh else '#334155'
 
+                def get_mp_header_label(phase_str):
+                    if "MP+" not in phase_str: return phase_str
+                    try:
+                        m_idx = int(phase_str.replace("MP+", "").replace("M", ""))
+                        if m_idx == 0:
+                            return f"{phase_str}<br><span style='font-size:10px; color:#64748b; font-weight:normal;'>~ {mp_anchor_date.year}/{mp_anchor_date.month}/{mp_cutoff_day}</span>"
+                        else:
+                            target_month = mp_anchor_date.month + m_idx
+                            target_year = mp_anchor_date.year + (target_month - 1) // 12
+                            target_month = (target_month - 1) % 12 + 1
+                            return f"{phase_str}<br><span style='font-size:10px; color:#64748b; font-weight:normal;'>~ {target_year}/{target_month}/{mp_cutoff_day}</span>"
+                    except: return phase_str
+
                 html_out = '<div class="table-container"><table class="custom-matrix-table">'
-                html_out += '<thead><tr><th>Operation</th>'
+                html_out += '<thead><tr><th style="width: 10%;">Operation</th>'
                 
                 for col in ordered_phases:
-                    subtext = ""
-                    if "MP+" in col:
-                        try:
-                            m_idx = int(col.replace("MP+", "").replace("M", ""))
-                            if m_idx == 0:
-                                subtext = f"<br><span style='font-size:10px; color:#64748b; font-weight:normal;'>~ {mp_anchor_date.year}/{mp_anchor_date.month}/{mp_cutoff_day}</span>"
-                            else:
-                                target_month = mp_anchor_date.month + m_idx
-                                target_year = mp_anchor_date.year + (target_month - 1) // 12
-                                target_month = (target_month - 1) % 12 + 1
-                                subtext = f"<br><span style='font-size:10px; color:#64748b; font-weight:normal;'>~ {target_year}/{target_month}/{mp_cutoff_day}</span>"
-                        except: pass
-                    html_out += f'<th>{col}{subtext}</th>'
+                    html_out += f'<th>{get_mp_header_label(col)}</th>'
                 html_out += '</tr></thead><tbody>'
 
                 # 🌟 需求 1：無邊框、實體色塊包覆感 (稍微加深底色界定區塊)
