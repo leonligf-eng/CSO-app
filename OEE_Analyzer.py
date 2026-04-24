@@ -1077,11 +1077,12 @@ with main_tabs[1]:
                 # ==========================================
                 if not ft_df.empty:
                     html_out += f'<tr><td colspan="{len(ordered_phases) + 1}" style="{modern_header_style}">Operation Yield</td></tr>'
+                    
                     for op in ordered_ops:
                         html_out += f'<tr><th>{op}</th>'
                         op_data = ft_df[ft_df['OpNo'] == op]
                         
-                        # 🌟 判斷是否為抽測站點 (Sampling Operation)
+                        # 🌟 判斷是否為抽測站點 (利用站點名稱關鍵字)
                         is_sampling_op = any(keyword in str(op).upper() for keyword in ['EQC', 'QA', 'OQC'])
                         
                         for phase in ordered_phases:
@@ -1096,37 +1097,35 @@ with main_tabs[1]:
                                 f_qty = float(cell_data['FailQty'].values[0])
                                 
                                 if is_sampling_op:
-                                    # 🛡️ 抽測站點特殊邏輯：以實際操作數 (Pass + Fail) 為基準
-                                    actual_operated_qty = p_qty + f_qty
+                                    # --- 🛡️ 抽測站 (Sampling) 專屬真實邏輯 ---
+                                    # 抽測站的 t_qty 和 p_qty 是母批總數，而 t_in_qty 才是真實抽出來打的數量(如168)
+                                    # 所以傳統的 Input Loss (母批 - 抽測數) 是假 Loss，必須強制歸零。
                                     
-                                    # 如果連 Pass+Fail 都是 0，為避免除以零，退回使用 t_qty
-                                    base_qty = actual_operated_qty if actual_operated_qty > 0 else t_qty
+                                    # 真實的 OP Loss 只有在機台內遺失的數量：進站抽測數 - 出站抽測數 - 壞品數
+                                    real_fail_loss = max(0, int(t_in_qty - t_out_qty - f_qty)) if t_in_qty > 0 else 0
                                     
-                                    # 抽測站的 Loss 僅計算操作過程中真正遺失的數量 (不含被抽剩下的母批)
-                                    input_loss = max(0, int(base_qty - t_in_qty)) if t_in_qty > 0 and t_in_qty <= base_qty else 0
-                                    pass_loss = max(0, int(t_out_qty - p_qty))
-                                    fail_loss = max(0, int(t_in_qty - t_out_qty - f_qty)) if t_in_qty > 0 else 0
+                                    op_loss_total = real_fail_loss
+                                    base_qty = t_in_qty if t_in_qty > 0 else t_qty # 分母改為真實抽測數
                                     
-                                    op_loss_total = input_loss + pass_loss
                                     op_y_val = (1 - (op_loss_total / base_qty)) * 100 if base_qty > 0 else 0
                                     
-                                    # 為了顯示正確，替換顯示用的 Input 值
-                                    display_input_loss = input_loss
-                                    
+                                    # 為了 UI 顯示合理且乾淨，將非相關的 Loss 歸零
+                                    input_loss = 0
+                                    pass_loss = 0
+                                    fail_loss = real_fail_loss
                                 else:
-                                    # 原本 100% 全測站點的邏輯
+                                    # --- 🏭 全測站 (100% Screening) 原本邏輯 ---
                                     input_loss = max(0, int(t_qty - t_in_qty))
                                     pass_loss = max(0, int(t_out_qty - p_qty))
                                     fail_loss = max(0, int(t_in_qty - t_out_qty - f_qty))
                                     
                                     op_loss_total = input_loss + pass_loss
                                     op_y_val = (1 - (op_loss_total / t_qty)) * 100 if t_qty > 0 else 0
-                                    display_input_loss = input_loss
                                 
                                 bg = get_bg_color(op_y_val, op_g, op_r)
                                 txt_c = get_text_color(op_y_val, op_r)
                                 
-                                cell_html = f"<div style='color: {txt_c};'><b>{op_y_val:.2f}%</b><br><div style='font-size: 11px; line-height: 1.3; color: #64748B;'>OP Loss: {op_loss_total:,}<br>(Input: {display_input_loss:,} | Pass: {pass_loss:,})<br>Fail Loss: {fail_loss:,}</div></div>"
+                                cell_html = f"<div style='color: {txt_c};'><b>{op_y_val:.2f}%</b><br><div style='font-size: 11px; line-height: 1.3; color: #64748B;'>OP Loss: {op_loss_total:,}<br>(Input: {input_loss:,} | Pass: {pass_loss:,})<br>Fail Loss: {fail_loss:,}</div></div>"
                                 html_out += f'<td style="background-color: {bg};">{cell_html}</td>'
                         html_out += '</tr>'
 
