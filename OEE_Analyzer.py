@@ -876,28 +876,26 @@ with main_tabs[1]:
                         def get_m_idx(dt, anchor, cutoff):
                             if pd.isna(dt): return 0
                             check_date = dt.date()
-                            if check_date < anchor: return 0
+                            if check_date < anchor: return 0 # 在 Anchor 之前的 PVT 統一算在 M_Idx=0
                             anchor_cycle = get_cycle_tuple(anchor, cutoff)
                             check_cycle = get_cycle_tuple(check_date, cutoff)
                             diff = (check_cycle[0] - anchor_cycle[0]) * 12 + (check_cycle[1] - anchor_cycle[1])
                             return max(0, diff)
 
-                        # 幫所有的 MP 加上月份索引
+                        # 🌟 核心修正：幫所有的 PVT 與 MP 加上月份索引 (不再分開)
                         build_df['M_Idx'] = build_df.apply(
-                            lambda x: get_m_idx(x['CheckOutTime'], mp_anchor_date, mp_cutoff_day) if x['Base_Phase'] == 'MP' else -1, 
+                            lambda x: get_m_idx(x['CheckOutTime'], mp_anchor_date, mp_cutoff_day) if x['Base_Phase'] in ['PVT', 'MP'] else -1, 
                             axis=1
                         )
                         
-                        max_m_idx = build_df[build_df['Base_Phase'] == 'MP']['M_Idx'].max()
+                        # 動態計算出資料庫真正跑到的最大月份
+                        max_m_idx = build_df[build_df['Base_Phase'].isin(['PVT', 'MP'])]['M_Idx'].max()
                         max_m_idx = int(max_m_idx) if pd.notnull(max_m_idx) and max_m_idx >= 0 else 0
                         
-                        all_possible_mp = [f"MP+{i}M" for i in range(max_m_idx + 1)]
+                        all_possible_mp = ["PVT/MP+0M"] + [f"MP+{i}M" for i in range(1, max_m_idx + 1)]
                         
-                        # 預設選項: 如果 MP+0 沒有資料，預設就不選它 (應對 Case 2)
-                        has_mp0 = not build_df[(build_df['Base_Phase'] == 'MP') & (build_df['M_Idx'] == 0)].empty
+                        # 預設選項: 顯示最後 6 個結算點
                         default_visible = all_possible_mp[-6:] if len(all_possible_mp) > 6 else all_possible_mp.copy()
-                        if not has_mp0 and "MP+0M" in default_visible and len(default_visible) > 1:
-                            default_visible.remove("MP+0M")
 
                         selected_mp_phases = st.multiselect(
                             "3. Select Visible MP Columns", 
@@ -926,12 +924,15 @@ with main_tabs[1]:
             
             # 決定表頭要呈現哪些欄位
             if enable_time_slicing:
-                # 顯示 NPI (不顯示原本獨立的 MP 欄位)
-                npi_phases = [p for p in build_phases if p != "MP" and p in build_df['Base_Phase'].unique()]
-                visible_mp_phases = sorted(selected_mp_phases, key=lambda x: int(x.replace("MP+", "").replace("M", "")))
+                # 顯示 NPI (🌟 修正：拔除原本獨立的 PVT 與 MP 欄位)
+                npi_phases = [p for p in build_phases if p not in ["PVT", "MP"] and p in build_df['Base_Phase'].unique()]
+                # MP 欄位根據使用者選擇來排序
+                visible_mp_phases = []
+                if "PVT/MP+0M" in selected_mp_phases: visible_mp_phases.append("PVT/MP+0M")
+                visible_mp_phases += sorted([x for x in selected_mp_phases if x != "PVT/MP+0M"], key=lambda x: int(x.replace("MP+", "").replace("M", "")))
                 ordered_phases = npi_phases + visible_mp_phases
             else:
-                # 顯示全部有資料的原始階段
+                # Disable 時，顯示全部有資料的原始階段 (包含獨立的 PVT 與 MP)
                 ordered_phases = [p for p in build_phases if p in build_df['Base_Phase'].unique()]
 
             cum_records = []
@@ -939,8 +940,8 @@ with main_tabs[1]:
             for op in build_df['OpNo'].unique():
                 op_data = build_df[build_df['OpNo'] == op]
                 
-                # 1. 處理 Discrete (不管開關，原本的 NPI 階段都是直接加總)
-                discrete_phases = [p for p in ordered_phases if "MP+" not in p]
+                # 1. 處理 Discrete (NPI 階段都是直接加總)
+                discrete_phases = [p for p in ordered_phases if "MP+" not in p and p != "PVT/MP+0M"]
                 for p in discrete_phases:
                     row = op_data[op_data['Base_Phase'] == p]
                     if not row.empty:
@@ -952,19 +953,17 @@ with main_tabs[1]:
                 
                 # 2. 處理 CUM 累加 (只有開啟 Time-Slicing 才會執行)
                 if enable_time_slicing and visible_mp_phases:
-                    # PVT 作為 Base 墊底
-                    pvt_data = op_data[op_data['Base_Phase'] == 'PVT']
-                    cum_t = pvt_data['TestQty'].sum() if not pvt_data.empty else 0
-                    cum_p = pvt_data['PassQty'].sum() if not pvt_data.empty else 0
-                    cum_in = pvt_data['TestInQty'].sum() if not pvt_data.empty else 0
-                    cum_out = pvt_data['TestOutQty'].sum() if not pvt_data.empty else 0
-                    cum_f = pvt_data['FailQty'].sum() if not pvt_data.empty else 0
+                    # 取出這站所有的 PVT 與 MP 資料準備累加
+                    c_data = op_data[op_data['Base_Phase'].isin(['PVT', 'MP'])]
                     
-                    max_selected_m = max([int(x.replace("MP+", "").replace("M", "")) for x in visible_mp_phases])
+                    max_selected_m = 0
+                    for phase in visible_mp_phases:
+                        if phase != "PVT/MP+0M":
+                            max_selected_m = max(max_selected_m, int(phase.replace("MP+", "").replace("M", "")))
                     
-                    # 依序按月疊加 MP 資料
+                    cum_t = cum_p = cum_in = cum_out = cum_f = 0
                     for m_idx in range(max_selected_m + 1):
-                        m_row = op_data[(op_data['Base_Phase'] == 'MP') & (op_data['M_Idx'] == m_idx)]
+                        m_row = c_data[c_data['M_Idx'] == m_idx]
                         
                         cum_t += m_row['TestQty'].sum()
                         cum_p += m_row['PassQty'].sum()
@@ -972,8 +971,8 @@ with main_tabs[1]:
                         cum_out += m_row['TestOutQty'].sum()
                         cum_f += m_row['FailQty'].sum()
                         
-                        col_name = f"MP+{m_idx}M"
-                        # 只把在畫面上可視的月份推進結果表，確保效能與排版
+                        col_name = "PVT/MP+0M" if m_idx == 0 else f"MP+{m_idx}M"
+                        # 只把在畫面上可視的月份推進結果表
                         if cum_t > 0 and col_name in visible_mp_phases:
                             cum_records.append({
                                 'OpNo': op, 'Column_Name': col_name, 'Op_Weight': get_op_sort_weight(op),
@@ -1001,22 +1000,32 @@ with main_tabs[1]:
                     if pd.isna(val): return '#334155'
                     return '#991b1b' if val < r_thresh else '#334155'
 
+                # 🌟 核心標籤生成邏輯 (雙日期呈現)
                 def get_header_label(col_name):
-                    if not enable_time_slicing or "MP+" not in col_name: return col_name
+                    if not enable_time_slicing: return col_name
+                    
+                    anchor_str = mp_anchor_date.strftime('%Y/%m/%d')
+                    
                     try:
-                        m_idx = int(col_name.replace("MP+", "").replace("M", ""))
-                        
-                        # 利用 Python 的 datetime 邏輯推算精準的月份顯示
                         def get_cycle_tuple(d, cutoff):
                             if d.day <= cutoff: return (d.year, d.month)
                             else: return (d.year + 1, 1) if d.month == 12 else (d.year, d.month + 1)
                         
                         anchor_cycle = get_cycle_tuple(mp_anchor_date, mp_cutoff_day)
-                        target_month = anchor_cycle[1] + m_idx
-                        target_year = anchor_cycle[0] + (target_month - 1) // 12
-                        target_month = (target_month - 1) % 12 + 1
-                        return f"{col_name}<br><span style='font-size:10px; color:#64748b; font-weight:normal;'>~ {target_year}/{target_month:02d}/{mp_cutoff_day:02d}</span>"
-                    except: return col_name
+                        
+                        if col_name == "PVT/MP+0M":
+                            # 計算 Cutoff 0
+                            return f"{col_name}<br><span style='font-size:10px; color:#64748b; font-weight:normal;'>{anchor_str} ~ {anchor_cycle[0]}/{anchor_cycle[1]:02d}/{mp_cutoff_day:02d}</span>"
+                        elif "MP+" in col_name:
+                            m_idx = int(col_name.replace("MP+", "").replace("M", ""))
+                            target_month = anchor_cycle[1] + m_idx
+                            target_year = anchor_cycle[0] + (target_month - 1) // 12
+                            target_month = (target_month - 1) % 12 + 1
+                            # 所有的 MP+XM 因為是 CUM 累加，所以起點永遠是 Anchor
+                            return f"{col_name}<br><span style='font-size:10px; color:#64748b; font-weight:normal;'>{anchor_str} ~ {target_year}/{target_month:02d}/{mp_cutoff_day:02d}</span>"
+                    except: pass
+                    
+                    return col_name
 
                 html_out = '<div class="table-container"><table class="custom-matrix-table">'
                 html_out += '<thead><tr><th style="width: 10%;">Operation</th>'
