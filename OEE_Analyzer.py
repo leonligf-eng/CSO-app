@@ -874,15 +874,16 @@ with main_tabs[1]:
                             else: return (d.year + 1, 1) if d.month == 12 else (d.year, d.month + 1)
 
                         def get_m_idx(dt, anchor, cutoff):
-                            if pd.isna(dt): return 0
+                            if pd.isna(dt): return -1
                             check_date = dt.date()
-                            if check_date < anchor: return 0 # 在 Anchor 之前的 PVT 統一算在 M_Idx=0
+                            # 🌟 修正 1：嚴格排除 Anchor 之前的資料，這樣切換 Anchor 日期時，過往的數字才會被剔除並產生變化
+                            if check_date < anchor: return -1 
                             anchor_cycle = get_cycle_tuple(anchor, cutoff)
                             check_cycle = get_cycle_tuple(check_date, cutoff)
                             diff = (check_cycle[0] - anchor_cycle[0]) * 12 + (check_cycle[1] - anchor_cycle[1])
                             return max(0, diff)
 
-                        # 🌟 核心修正：幫所有的 PVT 與 MP 加上月份索引 (不再分開)
+                        # 幫所有的 PVT 與 MP 加上月份索引
                         build_df['M_Idx'] = build_df.apply(
                             lambda x: get_m_idx(x['CheckOutTime'], mp_anchor_date, mp_cutoff_day) if x['Base_Phase'] in ['PVT', 'MP'] else -1, 
                             axis=1
@@ -894,8 +895,11 @@ with main_tabs[1]:
                         
                         all_possible_mp = ["PVT/MP+0M"] + [f"MP+{i}M" for i in range(1, max_m_idx + 1)]
                         
-                        # 預設選項: 顯示最後 6 個結算點
+                        # 預設選項: 如果 MP+0 沒有資料，預設就不選它
+                        has_mp0 = not build_df[(build_df['Base_Phase'].isin(['PVT', 'MP'])) & (build_df['M_Idx'] == 0)].empty
                         default_visible = all_possible_mp[-6:] if len(all_possible_mp) > 6 else all_possible_mp.copy()
+                        if not has_mp0 and "PVT/MP+0M" in default_visible and len(default_visible) > 1:
+                            default_visible.remove("PVT/MP+0M")
 
                         selected_mp_phases = st.multiselect(
                             "3. Select Visible MP Columns", 
@@ -924,7 +928,7 @@ with main_tabs[1]:
             
             # 決定表頭要呈現哪些欄位
             if enable_time_slicing:
-                # 顯示 NPI (🌟 修正：拔除原本獨立的 PVT 與 MP 欄位)
+                # 顯示 NPI (拔除原本獨立的 PVT 與 MP 欄位)
                 npi_phases = [p for p in build_phases if p not in ["PVT", "MP"] and p in build_df['Base_Phase'].unique()]
                 # MP 欄位根據使用者選擇來排序
                 visible_mp_phases = []
@@ -1000,7 +1004,7 @@ with main_tabs[1]:
                     if pd.isna(val): return '#334155'
                     return '#991b1b' if val < r_thresh else '#334155'
 
-                # 🌟 核心標籤生成邏輯 (雙日期呈現)
+                # 🌟 修正 2：精準修改標籤顯示邏輯
                 def get_header_label(col_name):
                     if not enable_time_slicing: return col_name
                     
@@ -1014,15 +1018,15 @@ with main_tabs[1]:
                         anchor_cycle = get_cycle_tuple(mp_anchor_date, mp_cutoff_day)
                         
                         if col_name == "PVT/MP+0M":
-                            # 計算 Cutoff 0
+                            # 計算 Cutoff 0 (完整區間)
                             return f"{col_name}<br><span style='font-size:10px; color:#64748b; font-weight:normal;'>{anchor_str} ~ {anchor_cycle[0]}/{anchor_cycle[1]:02d}/{mp_cutoff_day:02d}</span>"
                         elif "MP+" in col_name:
                             m_idx = int(col_name.replace("MP+", "").replace("M", ""))
                             target_month = anchor_cycle[1] + m_idx
                             target_year = anchor_cycle[0] + (target_month - 1) // 12
                             target_month = (target_month - 1) % 12 + 1
-                            # 所有的 MP+XM 因為是 CUM 累加，所以起點永遠是 Anchor
-                            return f"{col_name}<br><span style='font-size:10px; color:#64748b; font-weight:normal;'>{anchor_str} ~ {target_year}/{target_month:02d}/{mp_cutoff_day:02d}</span>"
+                            # 🌟 只顯示終點，呈現乾淨俐落
+                            return f"{col_name}<br><span style='font-size:10px; color:#64748b; font-weight:normal;'>~ {target_year}/{target_month:02d}/{mp_cutoff_day:02d}</span>"
                     except: pass
                     
                     return col_name
