@@ -841,54 +841,71 @@ with main_tabs[1]:
         build_df['Base_Phase'] = build_df['ProgramName'].map(prog_to_build)
         build_df = build_df.dropna(subset=['Base_Phase'])
         
-        # 🌟 智慧錨點 (Smart Anchor): 自動捕捉 MP 程式的第一筆進站時間
-        mp_only_df = build_df[build_df['Base_Phase'] == 'MP']
-        if not mp_only_df.empty:
-            auto_mp_anchor = mp_only_df['CheckInTime'].min().date()
+        # 🌟 智慧錨點 (Smart Anchor): 自動捕捉 PVT 或 MP 程式的「第一筆進站時間」
+        pvt_mp_df = build_df[build_df['Base_Phase'].isin(['PVT', 'MP'])]
+        if not pvt_mp_df.empty:
+            auto_pvt_mp_anchor = pvt_mp_df['CheckInTime'].min().date()
         else:
-            auto_mp_anchor = global_min_date
+            auto_pvt_mp_anchor = global_min_date
 
         if build_df.empty:
             st.info("💡 Please assign at least one program to a Build Phase above to generate the Matrix Report.")
         else:
             # =========================================================
-            # 🌟 新增：MP 時間切片與防爆表格設定區 (移至下方)
+            # 🌟 新增：主動開關與 MP Time-Slicing 設定區
             # =========================================================
-            def get_mp_slice(dt, anchor, cutoff):
-                if pd.isna(dt): return "MP+0M"
-                check_date = dt.date()
-                if check_date < anchor: return "MP+0M"
-                diff_months = (check_date.year - anchor.year) * 12 + (check_date.month - anchor.month)
-                if check_date.day >= cutoff:
-                    diff_months += 1
-                return f"MP+{max(0, diff_months)}M"
-
-            # 預先計算所有可能的 MP 月份，供下拉選單使用
-            temp_phases = build_df.apply(
-                lambda x: get_mp_slice(x['CheckOutTime'], auto_mp_anchor, 25) if x['Base_Phase'] == "MP" else x['Base_Phase'], 
-                axis=1
-            )
-            all_possible_mp = sorted([p for p in temp_phases.unique() if "MP+" in str(p)], key=lambda x: int(x.replace("MP+", "").replace("M", "")))
+            st.markdown("#### 📊 Comprehensive Build Evolution Matrix")
             
-            with st.expander("📅 MP Time-Slicing & Rolling Window Settings", expanded=True):
-                st.markdown("<p style='font-size: 13px; color: #666;'>Configure how Mass Production (MP) data is sliced by month and accumulated.</p>", unsafe_allow_html=True)
-                m_col1, m_col2, m_col3 = st.columns([1.5, 1, 2])
-                with m_col1:
-                    mp_anchor_date = st.date_input("1. MP Start Date (Anchor)", value=auto_mp_anchor)
-                with m_col2:
-                    mp_cutoff_day = st.number_input("2. Monthly Cut-off Day", min_value=1, max_value=31, value=25)
-                with m_col3:
-                    default_visible = all_possible_mp[-6:] if len(all_possible_mp) > 6 else all_possible_mp
-                    selected_mp_phases = st.multiselect(
-                        "3. Select Visible MP Columns", 
-                        options=all_possible_mp, 
-                        default=default_visible,
-                        help="Choose exactly which MP months to display. The calculation runs correctly in the background regardless of visibility."
-                    )
+            # 預設為 Disable (關閉)，保持原本乾淨的視圖
+            enable_time_slicing = st.toggle("🚀 Enable MP Time-Slicing & CUM Yield", value=False, help="Enable to slice PVT & MP data by month from the start date, calculating cumulative yield for finance/planning reviews.")
             
-            st.markdown("#### 📊 Comprehensive Build Evolution Matrix (MP CUM Yield)")
+            if enable_time_slicing:
+                with st.expander("📅 MP Time-Slicing & Rolling Window Settings", expanded=True):
+                    st.markdown("<p style='font-size: 13px; color: #666;'>Configure how Mass Production (MP) data is sliced by month and accumulated (includes PVT data).</p>", unsafe_allow_html=True)
+                    m_col1, m_col2, m_col3 = st.columns([1.5, 1, 2])
+                    with m_col1:
+                        mp_anchor_date = st.date_input("1. PVT / MP Start Date (Anchor)", value=auto_pvt_mp_anchor)
+                    with m_col2:
+                        mp_cutoff_day = st.number_input("2. Monthly Cut-off Day", min_value=1, max_value=31, value=25)
+                    with m_col3:
+                        # 核心算月邏輯
+                        def get_m_idx(dt):
+                            if pd.isna(dt): return 0
+                            check_date = dt.date()
+                            if check_date < mp_anchor_date: return 0
+                            diff_months = (check_date.year - mp_anchor_date.year) * 12 + (check_date.month - mp_anchor_date.month)
+                            if check_date.day >= mp_cutoff_day:
+                                diff_months += 1
+                            return diff_months
 
-            # --- 排序權重函數 ---
+                        # 幫所有的 PVT/MP 加上月份索引
+                        build_df['M_Idx'] = build_df.apply(
+                            lambda x: get_m_idx(x['CheckOutTime']) if x['Base_Phase'] in ['PVT', 'MP'] else -1, 
+                            axis=1
+                        )
+                        
+                        # 動態計算出資料庫真正跑到的最大月份
+                        max_m_idx = build_df['M_Idx'].max()
+                        max_m_idx = int(max_m_idx) if pd.notnull(max_m_idx) and max_m_idx >= 0 else 0
+                        
+                        all_possible_mp = [f"MP+{i}M" for i in range(max_m_idx + 1)]
+                        default_visible = all_possible_mp[-6:] if len(all_possible_mp) > 6 else all_possible_mp
+                        
+                        selected_mp_phases = st.multiselect(
+                            "3. Select Visible MP Columns", 
+                            options=all_possible_mp, 
+                            default=default_visible,
+                            help="Choose exactly which MP months to display. Accumulation runs correctly in the background."
+                        )
+            else:
+                # Disable 狀態下的防呆預設值
+                selected_mp_phases = []
+                mp_anchor_date = auto_pvt_mp_anchor
+                mp_cutoff_day = 25
+
+            # =========================================================
+            # --- 🌟 大一統矩陣運算引擎 (雙軌並行) ---
+            # =========================================================
             def get_op_sort_weight(op_name):
                 op_upper = op_name.upper()
                 if "FT1" in op_upper: return 1
@@ -899,106 +916,98 @@ with main_tabs[1]:
             
             build_df['Op_Weight'] = build_df['OpNo'].apply(get_op_sort_weight)
             
-            # 正式應用切片規則
-            build_df['Final_Phase'] = build_df.apply(
-                lambda x: get_mp_slice(x['CheckOutTime'], mp_anchor_date, mp_cutoff_day) if x['Base_Phase'] == "MP" else x['Base_Phase'], 
-                axis=1
-            )
-
-            npi_phases = [p for p in build_phases if p != "MP"]
-            
-            # 建立完整的 MP 鏈條，確保 CUM 完美繼承
-            all_mp_phases_raw = sorted([p for p in build_df['Final_Phase'].unique() if "MP+" in str(p)], key=lambda x: int(x.replace("MP+", "").replace("M", "")))
-            if all_mp_phases_raw:
-                max_m = int(all_mp_phases_raw[-1].replace("MP+", "").replace("M", ""))
-                mp_chain = [f"MP+{i}M" for i in range(max_m + 1)]
+            # 決定表頭要呈現哪些欄位
+            if enable_time_slicing:
+                # 顯示 NPI (不顯示原本獨立的 MP 欄位)
+                npi_phases = [p for p in build_phases if p != "MP" and p in build_df['Base_Phase'].unique()]
+                visible_mp_phases = sorted(selected_mp_phases, key=lambda x: int(x.replace("MP+", "").replace("M", "")))
+                ordered_phases = npi_phases + visible_mp_phases
             else:
-                mp_chain = []
-            
-            visible_mp_phases = sorted(selected_mp_phases, key=lambda x: int(x.replace("MP+", "").replace("M", "")))
-            ordered_phases = npi_phases + visible_mp_phases
-
-            # 基礎聚合
-            base_agg = build_df.groupby(['OpNo', 'Final_Phase']).agg(
-                TestQty=('TestQty', 'sum'),
-                TestInQty=('TestInQty', 'sum'),
-                TestOutQty=('TestOutQty', 'sum'),
-                PassQty=('PassQty', 'sum'),
-                FailQty=('FailQty', 'sum')
-            ).reset_index()
+                # 顯示全部有資料的原始階段
+                ordered_phases = [p for p in build_phases if p in build_df['Base_Phase'].unique()]
 
             cum_records = []
-            for op in base_agg['OpNo'].unique():
-                op_data = base_agg[base_agg['OpNo'] == op]
-                
-                # NPI (Discrete)
-                for p in npi_phases:
-                    row = op_data[op_data['Final_Phase'] == p]
-                    if not row.empty:
-                        d = row.iloc[0].to_dict()
-                        d['Build_Phase'] = p 
-                        d['Op_Weight'] = get_op_sort_weight(op)
-                        cum_records.append(d)
-                
-                # MP (CUM)
-                cum_t = cum_p = cum_in = cum_out = cum_f = 0
-                for p in mp_chain:
-                    row = op_data[op_data['Final_Phase'] == p]
-                    if not row.empty:
-                        cum_t += row.iloc[0]['TestQty']
-                        cum_p += row.iloc[0]['PassQty']
-                        cum_in += row.iloc[0]['TestInQty']
-                        cum_out += row.iloc[0]['TestOutQty']
-                        cum_f += row.iloc[0]['FailQty']
-                    
-                    if cum_t > 0 and p in visible_mp_phases:
-                        cum_records.append({
-                            'OpNo': op, 'Build_Phase': p, 'Op_Weight': get_op_sort_weight(op),
-                            'TestQty': cum_t, 'PassQty': cum_p, 'TestInQty': cum_in, 'TestOutQty': cum_out, 'FailQty': cum_f
-                        })
-
-            final_cum_df = pd.DataFrame(cum_records)
             
-            if final_cum_df.empty:
-                st.warning("No data available for matrix generation after slicing.")
+            for op in build_df['OpNo'].unique():
+                op_data = build_df[build_df['OpNo'] == op]
+                
+                # 1. 處理 Discrete (不管開關，原本的 NPI 階段都是直接加總)
+                discrete_phases = [p for p in ordered_phases if "MP+" not in p]
+                for p in discrete_phases:
+                    row = op_data[op_data['Base_Phase'] == p]
+                    if not row.empty:
+                        cum_records.append({
+                            'OpNo': op, 'Column_Name': p, 'Op_Weight': get_op_sort_weight(op),
+                            'TestQty': row['TestQty'].sum(), 'PassQty': row['PassQty'].sum(), 
+                            'TestInQty': row['TestInQty'].sum(), 'TestOutQty': row['TestOutQty'].sum(), 'FailQty': row['FailQty'].sum()
+                        })
+                
+                # 2. 處理 CUM 累加 (只有開啟 Time-Slicing 才會執行)
+                if enable_time_slicing and visible_mp_phases:
+                    # 取出這站所有的 PVT 與 MP 資料準備累加
+                    c_data = op_data[op_data['Base_Phase'].isin(['PVT', 'MP'])]
+                    
+                    max_selected_m = max([int(x.replace("MP+", "").replace("M", "")) for x in visible_mp_phases])
+                    
+                    cum_t = cum_p = cum_in = cum_out = cum_f = 0
+                    for m_idx in range(max_selected_m + 1):
+                        m_row = c_data[c_data['M_Idx'] == m_idx]
+                        
+                        cum_t += m_row['TestQty'].sum()
+                        cum_p += m_row['PassQty'].sum()
+                        cum_in += m_row['TestInQty'].sum()
+                        cum_out += m_row['TestOutQty'].sum()
+                        cum_f += m_row['FailQty'].sum()
+                        
+                        col_name = f"MP+{m_idx}M"
+                        # 只把在畫面上可視的月份推進結果表
+                        if cum_t > 0 and col_name in visible_mp_phases:
+                            cum_records.append({
+                                'OpNo': op, 'Column_Name': col_name, 'Op_Weight': get_op_sort_weight(op),
+                                'TestQty': cum_t, 'PassQty': cum_p, 
+                                'TestInQty': cum_in, 'TestOutQty': cum_out, 'FailQty': cum_f
+                            })
+
+            final_matrix_df = pd.DataFrame(cum_records)
+            
+            if final_matrix_df.empty:
+                st.warning("No data available for matrix generation.")
             else:
                 # --- 分類資料 ---
-                ft_df = final_cum_df[~final_cum_df['OpNo'].str.contains('LS', case=False, na=False)].copy()
-                ls_df = final_cum_df[final_cum_df['OpNo'].str.contains('LS', case=False, na=False)].copy()
+                ft_df = final_matrix_df[~final_matrix_df['OpNo'].str.contains('LS', case=False, na=False)].copy()
+                ls_df = final_matrix_df[final_matrix_df['OpNo'].str.contains('LS', case=False, na=False)].copy()
 
-                # 動態背景色判定
+                # 動態顏色判定
                 def get_bg_color(val, g_thresh, r_thresh):
                     if pd.isna(val): return ''
-                    if val >= g_thresh: return '#e6f4ea' # 淺綠
-                    elif val >= r_thresh: return '#fef08a' # 淺黃 warning
-                    else: return '#fee2e2' # 淺紅 critical
+                    if val >= g_thresh: return '#e6f4ea' 
+                    elif val >= r_thresh: return '#fef08a' 
+                    else: return '#fee2e2' 
                 
-                # 🌟 動態文字顏色判定 (Critical 變深紅)
                 def get_text_color(val, r_thresh):
                     if pd.isna(val): return '#334155'
                     return '#991b1b' if val < r_thresh else '#334155'
 
-                def get_mp_header_label(phase_str):
-                    if "MP+" not in phase_str: return phase_str
+                def get_header_label(col_name):
+                    if not enable_time_slicing or "MP+" not in col_name: return col_name
                     try:
-                        m_idx = int(phase_str.replace("MP+", "").replace("M", ""))
+                        m_idx = int(col_name.replace("MP+", "").replace("M", ""))
                         if m_idx == 0:
-                            return f"{phase_str}<br><span style='font-size:10px; color:#64748b; font-weight:normal;'>~ {mp_anchor_date.year}/{mp_anchor_date.month}/{mp_cutoff_day}</span>"
+                            return f"{col_name}<br><span style='font-size:10px; color:#64748b; font-weight:normal;'>~ {mp_anchor_date.year}/{mp_anchor_date.month}/{mp_cutoff_day}</span>"
                         else:
                             target_month = mp_anchor_date.month + m_idx
                             target_year = mp_anchor_date.year + (target_month - 1) // 12
                             target_month = (target_month - 1) % 12 + 1
-                            return f"{phase_str}<br><span style='font-size:10px; color:#64748b; font-weight:normal;'>~ {target_year}/{target_month}/{mp_cutoff_day}</span>"
-                    except: return phase_str
+                            return f"{col_name}<br><span style='font-size:10px; color:#64748b; font-weight:normal;'>~ {target_year}/{target_month}/{mp_cutoff_day}</span>"
+                    except: return col_name
 
                 html_out = '<div class="table-container"><table class="custom-matrix-table">'
                 html_out += '<thead><tr><th style="width: 10%;">Operation</th>'
                 
                 for col in ordered_phases:
-                    html_out += f'<th>{get_mp_header_label(col)}</th>'
+                    html_out += f'<th>{get_header_label(col)}</th>'
                 html_out += '</tr></thead><tbody>'
 
-                # 🌟 需求 1：無邊框、實體色塊包覆感 (稍微加深底色界定區塊)
                 modern_header_style = "background-color: #E0F2FE; color: #0369A1; font-family: 'Google Sans', Roboto, sans-serif; font-weight: 800; font-size: 16px; text-align: center; padding: 14px; letter-spacing: 0.5px; position: sticky; left: 0; z-index: 1;"
 
                 # ==========================================
@@ -1006,21 +1015,19 @@ with main_tabs[1]:
                 # ==========================================
                 if not ft_df.empty:
                     html_out += f'<tr><td colspan="{len(ordered_phases) + 1}" style="{modern_header_style}">Test Yield</td></tr>'
-                    
                     ordered_ops = ft_df.sort_values('Op_Weight')['OpNo'].unique().tolist()
                     
                     for op in ordered_ops:
                         html_out += f'<tr><th>{op}</th>'
                         op_data = ft_df[ft_df['OpNo'] == op]
                         for phase in ordered_phases:
-                            cell_data = op_data[op_data['Build_Phase'] == phase]
+                            cell_data = op_data[op_data['Column_Name'] == phase]
                             if cell_data.empty or cell_data['TestQty'].values[0] == 0:
-                                # 🌟 需求 3：淡化空值符號
                                 html_out += '<td><span style="color: #CBD5E1;">-</span></td>'
                             else:
                                 t_val = int(cell_data['TestQty'].values[0])
                                 p_val = int(cell_data['PassQty'].values[0])
-                                y_val = (p_val / t_val) * 100
+                                y_val = (p_val / t_val) * 100 if t_val > 0 else 0
                                 
                                 bg = get_bg_color(y_val, ft_g, ft_r)
                                 txt_c = get_text_color(y_val, ft_r)
@@ -1034,12 +1041,11 @@ with main_tabs[1]:
                 # ==========================================
                 if not ft_df.empty:
                     html_out += f'<tr><td colspan="{len(ordered_phases) + 1}" style="{modern_header_style}">Operation Yield</td></tr>'
-                    
                     for op in ordered_ops:
                         html_out += f'<tr><th>{op}</th>'
                         op_data = ft_df[ft_df['OpNo'] == op]
                         for phase in ordered_phases:
-                            cell_data = op_data[op_data['Build_Phase'] == phase]
+                            cell_data = op_data[op_data['Column_Name'] == phase]
                             if cell_data.empty or cell_data['TestQty'].values[0] == 0:
                                 html_out += '<td><span style="color: #CBD5E1;">-</span></td>'
                             else:
@@ -1049,7 +1055,6 @@ with main_tabs[1]:
                                 p_qty = float(cell_data['PassQty'].values[0])
                                 f_qty = float(cell_data['FailQty'].values[0])
                                 
-                                # 🌟 絕對鐵律公式
                                 input_loss = max(0, int(t_qty - t_in_qty))
                                 pass_loss = max(0, int(t_out_qty - p_qty))
                                 fail_loss = max(0, int(t_in_qty - t_out_qty - f_qty))
@@ -1060,7 +1065,6 @@ with main_tabs[1]:
                                 bg = get_bg_color(op_y_val, op_g, op_r)
                                 txt_c = get_text_color(op_y_val, op_r)
                                 
-                                # 🌟 需求 2：次級資訊文字淡化 (#64748B)
                                 cell_html = f"<div style='color: {txt_c};'><b>{op_y_val:.2f}%</b><br><div style='font-size: 11px; line-height: 1.3; color: #64748B;'>OP Loss: {op_loss_total:,}<br>(Input: {input_loss:,} | Pass: {pass_loss:,})<br>Fail Loss: {fail_loss:,}</div></div>"
                                 html_out += f'<td style="background-color: {bg};">{cell_html}</td>'
                         html_out += '</tr>'
@@ -1070,20 +1074,18 @@ with main_tabs[1]:
                 # ==========================================
                 if not ls_df.empty:
                     html_out += f'<tr><td colspan="{len(ordered_phases) + 1}" style="{modern_header_style}">LS Yield</td></tr>'
-                    
                     ordered_ops_ls = ls_df.sort_values('Op_Weight')['OpNo'].unique().tolist()
-                    
                     for op in ordered_ops_ls:
                         html_out += f'<tr><th>{op}</th>'
                         op_data = ls_df[ls_df['OpNo'] == op]
                         for phase in ordered_phases:
-                            cell_data = op_data[op_data['Build_Phase'] == phase]
+                            cell_data = op_data[op_data['Column_Name'] == phase]
                             if cell_data.empty or cell_data['TestQty'].values[0] == 0:
                                 html_out += '<td><span style="color: #CBD5E1;">-</span></td>'
                             else:
                                 t_val = int(cell_data['TestQty'].values[0])
                                 p_val = int(cell_data['PassQty'].values[0])
-                                y_val = (p_val / t_val) * 100
+                                y_val = (p_val / t_val) * 100 if t_val > 0 else 0
                                 
                                 bg = get_bg_color(y_val, ls_g, ls_r)
                                 txt_c = get_text_color(y_val, ls_r)
