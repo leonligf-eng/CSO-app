@@ -864,7 +864,13 @@ with main_tabs[1]:
                     st.markdown("<p style='font-size: 13px; color: #666;'>Configure how Mass Production (MP) data is sliced by month and accumulated (includes PVT data).</p>", unsafe_allow_html=True)
                     m_col1, m_col2, m_col3 = st.columns([1.5, 1, 2])
                     with m_col1:
-                        mp_anchor_date = st.date_input("1. PVT / MP Start Date (Anchor)", value=auto_pvt_mp_anchor)
+                        # 🌟 修正：加入 min_value 限制，鎖死日曆不讓使用者選到比第一筆 PVT/MP 還早的時間
+                        mp_anchor_date = st.date_input(
+                            "1. PVT / MP Start Date (Anchor)", 
+                            value=auto_pvt_mp_anchor,
+                            min_value=auto_pvt_mp_anchor,
+                            max_value=global_max_date
+                        )
                     with m_col2:
                         mp_cutoff_day = st.number_input("2. Monthly Cut-off Day", min_value=1, max_value=31, value=25)
                     with m_col3:
