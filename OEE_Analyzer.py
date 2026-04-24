@@ -1080,6 +1080,10 @@ with main_tabs[1]:
                     for op in ordered_ops:
                         html_out += f'<tr><th>{op}</th>'
                         op_data = ft_df[ft_df['OpNo'] == op]
+                        
+                        # 🌟 判斷是否為抽測站點 (Sampling Operation)
+                        is_sampling_op = any(keyword in str(op).upper() for keyword in ['EQC', 'QA', 'OQC'])
+                        
                         for phase in ordered_phases:
                             cell_data = op_data[op_data['Column_Name'] == phase]
                             if cell_data.empty or cell_data['TestQty'].values[0] == 0:
@@ -1091,17 +1095,38 @@ with main_tabs[1]:
                                 p_qty = float(cell_data['PassQty'].values[0])
                                 f_qty = float(cell_data['FailQty'].values[0])
                                 
-                                input_loss = max(0, int(t_qty - t_in_qty))
-                                pass_loss = max(0, int(t_out_qty - p_qty))
-                                fail_loss = max(0, int(t_in_qty - t_out_qty - f_qty))
-                                
-                                op_loss_total = input_loss + pass_loss
-                                op_y_val = (1 - (op_loss_total / t_qty)) * 100 if t_qty > 0 else 0
+                                if is_sampling_op:
+                                    # 🛡️ 抽測站點特殊邏輯：以實際操作數 (Pass + Fail) 為基準
+                                    actual_operated_qty = p_qty + f_qty
+                                    
+                                    # 如果連 Pass+Fail 都是 0，為避免除以零，退回使用 t_qty
+                                    base_qty = actual_operated_qty if actual_operated_qty > 0 else t_qty
+                                    
+                                    # 抽測站的 Loss 僅計算操作過程中真正遺失的數量 (不含被抽剩下的母批)
+                                    input_loss = max(0, int(base_qty - t_in_qty)) if t_in_qty > 0 and t_in_qty <= base_qty else 0
+                                    pass_loss = max(0, int(t_out_qty - p_qty))
+                                    fail_loss = max(0, int(t_in_qty - t_out_qty - f_qty)) if t_in_qty > 0 else 0
+                                    
+                                    op_loss_total = input_loss + pass_loss
+                                    op_y_val = (1 - (op_loss_total / base_qty)) * 100 if base_qty > 0 else 0
+                                    
+                                    # 為了顯示正確，替換顯示用的 Input 值
+                                    display_input_loss = input_loss
+                                    
+                                else:
+                                    # 原本 100% 全測站點的邏輯
+                                    input_loss = max(0, int(t_qty - t_in_qty))
+                                    pass_loss = max(0, int(t_out_qty - p_qty))
+                                    fail_loss = max(0, int(t_in_qty - t_out_qty - f_qty))
+                                    
+                                    op_loss_total = input_loss + pass_loss
+                                    op_y_val = (1 - (op_loss_total / t_qty)) * 100 if t_qty > 0 else 0
+                                    display_input_loss = input_loss
                                 
                                 bg = get_bg_color(op_y_val, op_g, op_r)
                                 txt_c = get_text_color(op_y_val, op_r)
                                 
-                                cell_html = f"<div style='color: {txt_c};'><b>{op_y_val:.2f}%</b><br><div style='font-size: 11px; line-height: 1.3; color: #64748B;'>OP Loss: {op_loss_total:,}<br>(Input: {input_loss:,} | Pass: {pass_loss:,})<br>Fail Loss: {fail_loss:,}</div></div>"
+                                cell_html = f"<div style='color: {txt_c};'><b>{op_y_val:.2f}%</b><br><div style='font-size: 11px; line-height: 1.3; color: #64748B;'>OP Loss: {op_loss_total:,}<br>(Input: {display_input_loss:,} | Pass: {pass_loss:,})<br>Fail Loss: {fail_loss:,}</div></div>"
                                 html_out += f'<td style="background-color: {bg};">{cell_html}</td>'
                         html_out += '</tr>'
 
