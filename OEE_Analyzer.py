@@ -806,8 +806,6 @@ with main_tabs[1]:
                 )
             else:
                 st.info("Assign some programs first to enable exporting.")
-
-        st.write("")
         
         # ==============================================================================
         # --- 🎨 獨立閾值設定 ---
