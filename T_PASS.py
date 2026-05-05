@@ -2,8 +2,13 @@ import streamlit as st
 import datetime
 import uuid
 
+# ------------------------------------------------------------------------
+# System Name: T-PASS (Test Program Approval & Sign-off System)
+# Alternate Concept: PROVE (Program Release & Offline Validation Engine)
+# ------------------------------------------------------------------------
+
 st.set_page_config(page_title="T-PASS (Test Program Approval & Sign-off System)", layout="wide")
-#PROVE (Program Release & Offline Validation Engine)
+
 # ==========================================
 # 0. UI Theme Override (Vibrant Modern Tech Blue)
 # ==========================================
@@ -36,10 +41,13 @@ st.markdown("""
         border-color: #9ca3af !important;
         background-color: #f3f4f6 !important;
     }
+    .help-text { font-size: 0.9em; color: #4b5563; line-height: 1.6; }
+    .help-text h3 { margin-top: 16px; margin-bottom: 8px; font-size: 1.1em; color: #1f2937; }
+    .help-text ul { margin-top: 4px; margin-bottom: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
-# 💡 定義超緊湊的自定義分隔線，取代原生的 st.divider() 與 st.write("---")
+# 超緊湊的自定義分隔線
 DIVIDER = "<hr style='margin: 12px 0; border: none; border-top: 1px solid #e5e7eb;' />"
 
 # ==========================================
@@ -49,16 +57,16 @@ FLOW_CONFIG = {
     "MP (Mass Production Release)": [
         {"title": "1. PDTE Release", "sla_days": 0, "poc": "CSO-PE", "desc": "Release new test program. Set baseline for error-proofing.", "form_type": "init_form"},
         {"title": "2. Offline Trial", "sla_days": 1, "poc": "CSO-OPS", "desc": "Offline CORR validation and Fuse check.", "form_type": "offline_check", "target_offline": 500, "target_fuse": 8},
-        {"title": "3. Data Review", "sla_days": 1, "poc": "CSO-PE", "desc": "Review key items and OTP content correctness.", "form_type": "pe_signoff"},
-        {"title": "4. Trial Run", "sla_days": 3, "poc": "CSO-OPS", "desc": "Ops handle the FT/SLT offline mode trial run data for MES and checking GSMI, EAC, etc., at KYEC", "form_type": "trial_data", "target_trial": 3000, "trial_mode": "Offline (Using SEN)"},
-        {"title": "5. Official Release", "sla_days": 2, "poc": "CSO-PE", "desc": "Official release to OSAT.", "form_type": "final_release"}
+        {"title": "3. Data Review", "sla_days": 1, "poc": "CSO-PE", "desc": "Review key items and fuse content correctness.", "form_type": "pe_signoff"},
+        {"title": "4. Trial Run", "sla_days": 3, "poc": "CSO-OPS", "desc": "Process FT/SLT offline mode trial run data for MES and verify GSMI, EAC, etc.", "form_type": "trial_data", "target_trial": 3000, "trial_mode": "Offline (Using SEN)"},
+        {"title": "5. Official Release", "sla_days": 2, "poc": "CSO-PE", "desc": "Review final data and officially release to OSAT.", "form_type": "final_release"}
     ],
     "NPI - Option 1 (Initial Release)": [
         {"title": "1. PDTE Release", "sla_days": 0, "poc": "CSO-PE", "desc": "Release new test program. Set baseline for error-proofing.", "form_type": "init_form"},
         {"title": "2. Offline Trial", "sla_days": 1, "poc": "CSO-OPS", "desc": "Offline CORR validation and Fuse check.", "form_type": "offline_check", "target_offline": 200, "target_fuse": 2},
-        {"title": "3. Data Review", "sla_days": 1, "poc": "CSO-PE", "desc": "Review key items and OTP content correctness.", "form_type": "pe_signoff"},
-        {"title": "4. Trial Run", "sla_days": 2, "poc": "CSO-OPS", "desc": "Ops handle the FT/SLT online mode trial run data for MES and checking GSMI, EAC, etc., at KYEC", "form_type": "trial_data", "target_trial": 50, "trial_mode": "Online (No SEN)"},
-        {"title": "5. Official Release", "sla_days": 3, "poc": "CSO-PE", "desc": "Official release to OSAT upon team agreement.", "form_type": "final_release"}
+        {"title": "3. Data Review", "sla_days": 1, "poc": "CSO-PE", "desc": "Review key items and fuse content correctness.", "form_type": "pe_signoff"},
+        {"title": "4. Trial Run", "sla_days": 2, "poc": "CSO-OPS", "desc": "Process FT/SLT online mode trial run data for MES and verify GSMI, EAC, etc.", "form_type": "trial_data", "target_trial": 50, "trial_mode": "Online (No SEN)"},
+        {"title": "5. Official Release", "sla_days": 3, "poc": "CSO-PE", "desc": "Review final data and officially release to OSAT.", "form_type": "final_release"}
     ]
 }
 
@@ -77,7 +85,7 @@ if 'mes_comments' not in st.session_state: st.session_state.mes_comments = ""
 if 'start_date' not in st.session_state: st.session_state.start_date = None
 
 # ==========================================
-# 3. Helper Functions (Dynamic UI & Reports)
+# 3. Helper Functions
 # ==========================================
 def format_lots_for_report(lots):
     lines = []
@@ -146,7 +154,7 @@ def render_dynamic_lots(lot_key, target_qty, is_active, default_yield=99.0, defa
         col_ratios = [3, 2, 2, 2, 1] if is_active else [3, 2, 2, 2]
         cols = st.columns(col_ratios)
         with cols[0]: lots[idx]["lot"] = st.text_input("Lot Information" if idx==0 else "", value=lot_data["lot"], key=f"{lot_key}_lot_{lot_data['id']}", disabled=not is_active, label_visibility="visible" if idx==0 else "collapsed")
-        with cols[1]: lots[idx]["qty"] = st.number_input(f"Qty ({target_qty}u)" if idx==0 else "", value=lot_data["qty"], key=f"{lot_key}_qty_{lot_data['id']}", disabled=not is_active, label_visibility="visible" if idx==0 else "collapsed")
+        with cols[1]: lots[idx]["qty"] = st.number_input(f"Qty" if idx==0 else "", value=lot_data["qty"], key=f"{lot_key}_qty_{lot_data['id']}", disabled=not is_active, label_visibility="visible" if idx==0 else "collapsed")
         with cols[2]: lots[idx]["yield"] = st.number_input("Final Yield (%)" if idx==0 else "", value=lot_data["yield"], key=f"{lot_key}_yld_{lot_data['id']}", disabled=not is_active, label_visibility="visible" if idx==0 else "collapsed")
         with cols[3]: lots[idx]["tt"] = st.number_input("Actual TT (s)" if idx==0 else "", value=lot_data["tt"], key=f"{lot_key}_tt_{lot_data['id']}", disabled=not is_active, label_visibility="visible" if idx==0 else "collapsed")
         if is_active:
@@ -170,7 +178,7 @@ def render_dynamic_lots(lot_key, target_qty, is_active, default_yield=99.0, defa
         st.rerun()
 
 # ==========================================
-# 4. UI Header
+# 4. UI Header & Help Documentation
 # ==========================================
 col_title, col_reset = st.columns([5, 1])
 with col_title: st.title("🛡️ T-PASS (Test Program Approval & Sign-off System)")
@@ -178,13 +186,68 @@ with col_reset:
     st.write("") 
     if st.button("🔄 Reset Demo State", use_container_width=True):
         st.session_state.clear(); st.rerun()
-st.markdown("---")
+
+with st.expander("ℹ️ Help: Standard Operating Procedure (SOP) & Stage Definitions"):
+    st.markdown("""
+    <div class='help-text'>
+    This system standardizes the Test Program (TP) release and qualification process across NPI and MP stages, ensuring clear handoffs between POCs and error-proofing before mass production.
+
+    ### 1. Acronyms & Terminology
+    *   **POC**: Point of Contact
+    *   **TP**: Test Program
+    *   **Fuse**: One-Time Programmable Memory (OTP)
+    *   **SEN / SWR**: Special Engineering Notice / Special Work Request
+    *   **LHN**: Lot History Notice
+    *   **MES**: Manufacturing Execution System
+    *   **OSAT**: Outsourced Semiconductor Assembly and Test
+    *   **TCCB**: Test Configuration Control Board
+    *   **FT / SLT / QA**: Final Test / System Level Test / Quality Assurance
+
+    ### 2. Core Process Stages & Responsibilities
+    *   **Parallel Task: KYEC MES Setup**
+        *   **POC**: CSO-ENG Ops
+        *   **Action**: KYEC sets up the MES system, including Test Program binding and MES preparation. The timing of this step varies depending on the build stage (see exceptions below).
+    *   **Stage 1: PDTE Release**
+        *   **POC**: PDTE, CSO-ENG PE
+        *   **Action**: PDTE hosts a meeting to review the TP change list and release the new TP. The CSO PE team issues the LHN and SEN to KYEC via Buganizer.
+    *   **Stage 2: Offline Trial**
+        *   **POC**: CSO-ENG Ops
+        *   **Action**: Conduct an offline trial run using the new TP (w/o fuse) for a preliminary check of the TP's yield. Fuse specific units to verify fuse correctness.
+    *   **Stage 3: Data Review**
+        *   **POC**: CSO-ENG PE, PDTE
+        *   **Action**: Review key items from the offline trial. If the yield target is met and fuse content correctness is confirmed, proceed to the next step.
+    *   **Stage 4: Trial Run**
+        *   **POC**: CSO-ENG Ops
+        *   **Action**: Process the FT/SLT trial run data (in Online or Offline mode) in MES and verify GSMI, EAC, etc., at KYEC. *(Test Flow: FT1 -> SLT -> 100% QA)*
+    *   **Stage 5: Official Release**
+        *   **POC**: CSO-ENG, PDTE
+        *   **Action**: Review the FT1/QA data, fuse data, and TCCB documents. Host a meeting to align on the release process, and then officially release the TP to the OSAT.
+
+    ### 3. Exceptions & Scenario Impacts
+    The release flow adapts based on the product's build stage. The key variables are the **Trial Run Mode (Online vs. Offline)**, the **use of SEN**, and the **MES Setup timing**.
+
+    *   **NPI - Option 1 (Initial TP Release)**
+        *   **Trial Run**: **Online Mode**. No SEN is required.
+        *   **Impact**: Directly affects online lots.
+        *   **MES Timing**: MES Setup must be completed *before* the Trial Run to ensure smooth online processing.
+    *   **NPI - Option 2 (TP Updated During Build)**
+        *   **Trial Run**: **Offline Mode**. Uses SEN (SWR).
+        *   **Impact**: **No online lots will be affected.** The production line continues to use the current TP revision for production.
+        *   **MES Timing**: MES Setup is executed at the very end, *after* Official Release.
+    *   **MP (Mass Production Phase)**
+        *   **Sampling**: Increased sampling requirements for both Offline Trial and Trial Run compared to NPI stages.
+        *   **Trial Run**: **Offline Mode**. Uses SEN (SWR).
+        *   **Impact**: **No online lots will be affected.** The production line continues to use the current TP revision for production.
+        *   **MES Timing**: MES Setup is executed *after* Official Release. Once approved (green-lit), the team must schedule a specific date to transition to the NEW TP.
+    </div>
+    """, unsafe_allow_html=True)
+
+# ✅ 改用超緊湊分隔線，移除原本產生大量空白的 st.markdown("---")
+st.markdown(DIVIDER, unsafe_allow_html=True)
 
 # ==========================================
 # 5. Vertical Split Layout & Report Variables
 # ==========================================
-
-# 建立全局變數供 Buganizer Report 使用
 proj_val = st.session_state.tp_data.get("project_name", "[Project]")
 build_val = st.session_state.tp_data.get("build_phase", "[Build Phase]")
 
@@ -195,7 +258,7 @@ if programs:
 else:
     rev_val = "[Program Revision]"
     
-REPORT_PREFIX = f"Update {proj_val} {build_val} {rev_val}"
+REPORT_PREFIX = f"[T-PASS] Update {proj_val} {build_val} {rev_val}"
 
 col_left, col_right = st.columns([1, 5])
 
@@ -211,7 +274,7 @@ with col_left:
     est_mes = st.session_state.start_date + datetime.timedelta(days=3) if st.session_state.start_date else None
     render_date_timeline(est_mes, st.session_state.mes_setup_date if st.session_state.mes_setup_done else None)
         
-    with st.container(border=True, height=687):
+    with st.container(border=True):
         st.markdown("**MES Setup**")
         st.caption("👤 POC: CSO-OPS")
         if not st.session_state.start_date:
@@ -281,7 +344,6 @@ with col_right:
     with st.container(border=True):
         st.subheader(f"📍 {active_step_data['title']}")
         st.markdown(f"👤 **POC:** `{active_step_data['poc']}` &nbsp;|&nbsp; 📋 **Task:** {active_step_data['desc']}")
-        # ✅ 使用超緊湊的分隔線取代原本的 st.divider()
         st.markdown(DIVIDER, unsafe_allow_html=True)
         
         # ==========================================
@@ -305,7 +367,6 @@ with col_right:
             
             comments = st.text_input("Comment (Special request)", value=st.session_state.tp_data.get("pdte_comments", ""), disabled=not is_active)
             
-            # ✅ 使用超緊湊分隔線
             st.markdown(DIVIDER, unsafe_allow_html=True)
             c_date, c_action = st.columns([1, 2])
             with c_date:
@@ -345,7 +406,7 @@ with col_right:
                 
             st.write("")
             chk1 = st.checkbox("✅ Correlation validation completed", value=not is_active, disabled=not is_active)
-            chk2 = st.checkbox("✅ OTP content correctness confirmed", value=not is_active, disabled=not is_active)
+            chk2 = st.checkbox("✅ Fuse content correctness confirmed", value=not is_active, disabled=not is_active)
 
             st.markdown(DIVIDER, unsafe_allow_html=True)
             c_date, c_action = st.columns([1, 2])
