@@ -1352,41 +1352,119 @@ with main_tabs[0]:
     # ==============================================================================
 
     st.sidebar.header("🧮 Capacity Calculator")
+    
+    # --- 1. 定義輸入參數 (雙欄排版，全域變數綁定與嚴格邊界防呆) ---
     with st.sidebar.expander("Detailed Parameters", expanded=False):
-        calc_lot_size = st.number_input("Lot Size", value=6600, step=100)
         
-        # 🌟 修正 1: Site Count 改為 1~16，預設為 8 (index 7)
-        calc_site = st.selectbox("Site", options=list(range(1, 17)), index=7)
-        
-        calc_test_time = st.number_input("Test Time (s)", value=150.00, step=1.00, format="%.2f")
-        calc_fpy = st.number_input("FPY %", value=95.00, step=1.00, format="%.2f")
-        calc_oee = st.number_input("OEE %", value=70.00, step=1.00, format="%.2f")
-        
-        if calc_test_time > 0:
-            single_cap = (86400 / calc_test_time) * int(calc_site) * (calc_oee / 100.0) * (calc_fpy / 100.0)
-        else:
-            single_cap = 0
+        # 第一排：數量與站點 (Lot Size 已加入 min_value=0 限制)
+        c1, c2 = st.columns(2)
+        with c1:
+            calc_lot_size = st.number_input("Lot Size", min_value=0, value=6600, step=100)
+        with c2:
+            calc_site = st.selectbox("Site", options=list(range(1, 17)), index=7)
             
+        # 第二排：時間變數 (Test Time 與 OP Time 已加入 min_value=0.0 限制)
+        c3, c4 = st.columns(2)
+        with c3:
+            calc_test_time = st.number_input("Test Time (s)", min_value=0.00, value=150.00, step=1.00, format="%.2f")
+        with c4:
+            calc_op_time = st.number_input("OP Time (min)", min_value=0.00, value=60.00, step=5.0)
+            
+        # 第三排：效率變數 (嚴格防呆：下限 0.00，上限鎖死 100.00)
+        c5, c6 = st.columns(2)
+        with c5:
+            calc_fpy = st.number_input("FPY %", min_value=0.00, max_value=100.00, value=95.00, step=1.00, format="%.2f")
+        with c6:
+            calc_oee = st.number_input("OEE %", min_value=0.00, max_value=100.00, value=70.00, step=1.00, format="%.2f")
+
+        # --- 2. 執行計算 (絕對穩態批次模型，每批剛性負擔完整 OP Time) ---
+        td = calc_lot_size / int(calc_site)
+        r0 = td * (calc_test_time / 60.0)
+        rt_cycle_time = ((calc_lot_size * (1 - (calc_fpy / 100.0))) / int(calc_site) * (calc_test_time / 60.0)) + calc_op_time
+        sum_cycle_time = r0 + rt_cycle_time
+        eff_mins_day = 1440 * (calc_oee / 100.0)
+        
+        # 產能結算
+        lots_per_day = eff_mins_day / sum_cycle_time if sum_cycle_time > 0 else 0
+        single_cap = lots_per_day * calc_lot_size
+        uph_cap = single_cap / 24
+
+        # --- 3. 顯示結果卡片 (上層大標 Normalized Output，下層雙欄 Capacity + 單位) ---
         st.markdown(f"""
-            <div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px; border: 1px solid #dee2e6; text-align: center;'>
-                <div style='font-size: 11px; color: #6c757d; font-weight: bold; text-transform: uppercase; margin-bottom: 5px; letter-spacing: 0.5px;'>
-                    Target Single Capacity (UPD)
+            <div style='background-color: #f8f9fa; padding: 12px 10px; border-radius: 6px; margin-top: 10px; margin-bottom: 15px; border: 1px solid #dee2e6; text-align: center;'>
+                <div style='font-size: 11px; color: #475569; font-weight: bold; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px;'>
+                    Normalized Output
                 </div>
-                <div style='font-size: 26px; color: #1E3A8A; font-weight: bold;'>
-                    🚀 {single_cap:,.0f} <span style='font-size: 13px; color: #6c757d;'>units/day</span>
+                <div style='display: flex; justify-content: space-between; align-items: center;'>
+                    <div style='flex: 1;'>
+                        <div style='font-size: 10px; color: #6c757d; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;'>
+                            Daily Capacity
+                        </div>
+                        <div style='font-size: 26px; color: #1E3A8A; font-weight: bold; line-height: 1;'>
+                            {single_cap:,.0f} <span style='font-size: 11px; color: #64748b; font-weight: normal;'>/day</span>
+                        </div>
+                    </div>
+                    <div style='width: 1px; background-color: #dee2e6; height: 30px;'></div>
+                    <div style='flex: 1;'>
+                        <div style='font-size: 10px; color: #6c757d; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;'>
+                            Hourly Capacity
+                        </div>
+                        <div style='font-size: 26px; color: #1E3A8A; font-weight: bold; line-height: 1;'>
+                            {uph_cap:,.0f} <span style='font-size: 11px; color: #64748b; font-weight: normal;'>/hr</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         """, unsafe_allow_html=True)
 
+        # --- 4. 驗證表格 (採用 Google Sans 乾淨渲染，嚴格靠右與小數點切齊) ---
+        st.caption("Verification Table")
+        
+        # 定義純文字與 Google Sans 風格的 CSS 變數
+        font_family = "'Google Sans', 'Roboto', -apple-system, sans-serif"
+        val_style = f"text-align: right; padding: 5px 8px; color: #334155; font-family: {font_family}; font-size: 13px;"
+        label_style = f"text-align: left; padding: 5px 8px; color: #475569; font-family: {font_family}; font-size: 13px;"
+        border_style = "border-bottom: 1px solid #e2e8f0;"
+        
+        table_html = f"""
+        <table style="width:100%; border-collapse: collapse; font-family: {font_family};">
+          <tr style="border-bottom: 2px solid #cbd5e1; background-color: #f8fafc;">
+            <th style="{label_style} font-weight: 600;">Metric</th>
+            <th style="{val_style} font-weight: 600;">Value</th>
+          </tr>
+          <tr style="{border_style}">
+            <td style="{label_style}">TD</td>
+            <td style="{val_style}">{td:,.2f}</td>
+          </tr>
+          <tr style="{border_style}">
+            <td style="{label_style}">R0 (min)</td>
+            <td style="{val_style}">{r0:,.2f}</td>
+          </tr>
+          <tr style="{border_style}">
+            <td style="{label_style}">RT Cycle (min)</td>
+            <td style="{val_style}">{rt_cycle_time:,.2f}</td>
+          </tr>
+          <tr style="{border_style}">
+            <td style="{label_style}">Sum Cycle (min)</td>
+            <td style="{val_style}">{sum_cycle_time:,.2f}</td>
+          </tr>
+          <tr>
+            <td style="{label_style}">Lots / Day</td>
+            <td style="{val_style}">{lots_per_day:,.2f}</td>
+          </tr>
+        </table>
+        """
+        st.markdown(table_html, unsafe_allow_html=True)
+
     st.sidebar.divider()
 
-    st.sidebar.header("📐 Planning & Targets")
+    st.sidebar.header("Planning & Targets")
     st.sidebar.markdown("<p style='color: #444; font-size: 13px;'>Define specific baselines for EACH selected operation.</p>", unsafe_allow_html=True)
 
     targets = {}
     if selected_ops:
         for op in selected_ops:
-            st.sidebar.markdown(f"**🔹 Operation: {op}**")
+            st.sidebar.markdown(f"**Operation: {op}**")
             theo = st.sidebar.number_input(f"Theo Max UPD ({op})", value=4240, step=10, key=f"theo_{op}")
             plan = st.sidebar.number_input(f"Planned Target ({op})", value=2800, step=100, key=f"plan_{op}")
             targets[op] = {'theo': theo, 'plan': plan}
