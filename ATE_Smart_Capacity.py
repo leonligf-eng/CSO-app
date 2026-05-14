@@ -97,17 +97,19 @@ def remove_ate(select_key, ate_id):
 with st.expander("ℹ️ Help: Formula & Parameter Definitions"):
     st.markdown("""
     ### 📖 Calculation Logic
-    To ensure transparency, the system follows the standard Excel-based production models:
+    To ensure transparency and strict alignment with industrial engineering (IE) steady-state models, the system applies the following logic:
+
     * **TD (Touch Downs):** `Lot Size / Site`
     * **Cycle Time (R0):** `TD * (Test Time / 60)` _(Standard testing time in minutes)_
-    * **RT Cycle Time (R1/R2):** `((Lot Size * (1 - FPY%)) / Site * (TT / 60)) + OP Time`
-    * **Sum Cycle Time:** `R0 + RT Cycle Time`
+    * **RT Cycle Time (R1/R2):** `((Lot Size * (1 - FPY%)) / Site * (Test Time / 60)) + OP Time`
+    * **Sum Cycle Time:** `R0 + RT Cycle Time` _(Total rigid machine time per lot including overhead)_
     * **Effective Mins/Day:** `1440 * OEE%`
     * **Lots/Day per Tester:** `Effective Mins/Day / Sum Cycle Time`
-    * **UPD (Units Per Day):** `Lots/Day per Tester * Lot Size`
+    * **Daily Capacity (UPD):** `Lots/Day per Tester * Lot Size` _(Units Per Day)_
+    * **Hourly Capacity (UPH):** `UPD / 24` _(Units Per Hour, rounded to nearest integer)_
     * **Required Testers:** `CEILING(Daily Target / Single Tester UPD)`
     * **Real WIP Flow:** `Single Tester UPD * (Actually Assigned Testers OR Required Testers)`
-    * **Flow Logic:** FT2/FT3 Start Date is offset by the first lot completion time of the previous stage.
+    * **Flow Logic:** FT2/FT3 Start Date is dynamically offset by the first lot completion time of the preceding stage.
     """)
 
 # ==============================================================================
