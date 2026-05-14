@@ -182,16 +182,29 @@ net_fleet_num = running_fleet_num - len(occupied_ates)
 st.sidebar.write(f"✅ Available ATEs for the Project: **{net_fleet_num}** ATEs")
 
 # --- Core Calculation Function ---
-def calculate_metrics(daily_target_units, lot_size, site, tt, fpy, oee):
+def calculate_metrics(daily_target_units, lot_size, site, tt, fpy, oee, op_time):
     td = lot_size / site if site > 0 else 0
     r0_mins = td * (tt / 60)
-    rt_mins = ((lot_size * (1 - fpy / 100)) / site * (tt / 60)) if site > 0 else 0
+    rt_mins = (((lot_size * (1 - fpy / 100)) / site * (tt / 60)) + op_time) if site > 0 else 0
     sum_mins = r0_mins + rt_mins
     eff_mins_per_day = 1440 * (oee / 100)
-    units_per_day_tester = (eff_mins_per_day / sum_mins) * lot_size if sum_mins > 0 else 0
+    lots_per_day = eff_mins_per_day / sum_mins if sum_mins > 0 else 0
+    units_per_day_tester = lots_per_day * lot_size
+    uph_effective = units_per_day_tester / 24
     req_testers = math.ceil(daily_target_units / units_per_day_tester) if units_per_day_tester > 0 else 0
-    uph_effective = (lot_size / r0_mins) * 60 * (oee / 100) if r0_mins > 0 else 0
-    return {"req": req_testers, "uph": int(uph_effective), "upd": int(units_per_day_tester), "cyc": round(sum_mins, 1)}
+    
+    # 修正：同時套用 round() 進行四捨五入，並用 int() 鎖定為整數型態
+    return {
+        "req": req_testers, 
+        "uph": int(round(uph_effective)), 
+        "upd": int(round(units_per_day_tester)), 
+        "cyc": round(sum_mins, 1),
+        "td": td,
+        "r0": r0_mins,
+        "rt": rt_mins,
+        "sum_mins": sum_mins,
+        "lots_day": lots_per_day
+    }
 
 # --- Dashboard Layout ---
 st.markdown("<div class='section-header'>ATE Status Overview</div>", unsafe_allow_html=True)
@@ -207,10 +220,11 @@ today = date.today()
 st.markdown("<hr style='margin-top: 15px; margin-bottom: 15px; border: none; border-top: 1px solid #e6e6e6;'>", unsafe_allow_html=True)
 
 input_cols = st.columns(3)
+# 初始化 Stages 陣列預設加入 OP 基準開銷參數
 stages = [
-    {"name": "FT1", "tt": 150.0, "fpy": 95.0, "qty": 36000},
-    {"name": "FT2", "tt": 25.0, "fpy": 99.9, "qty": 75000},
-    {"name": "FT3", "tt": 25.0, "fpy": 99.9, "qty": 0}
+    {"name": "FT1", "tt": 150.0, "fpy": 95.0, "qty": 36000, "op": 60.0},
+    {"name": "FT2", "tt": 25.0, "fpy": 99.9, "qty": 75000, "op": 60.0},
+    {"name": "FT3", "tt": 25.0, "fpy": 99.9, "qty": 0, "op": 60.0}
 ]
 
 global_due_date = None
@@ -281,17 +295,101 @@ for i, stage in enumerate(stages):
         working_days = max((due_date - start_date).days, 1)
         daily_target_units = ship_qty / working_days
 
-        # --- (C) 詳細參數配置 ---
+        # --- (C) 詳細參數配置 (升級為雙欄排列、極限鎖死與內嵌視覺對帳表) ---
         with st.expander("Detailed Parameters", expanded=False):
-            ls = st.number_input("Lot Size", value=6600, key=f"ls_{i}", disabled=not is_enabled)
-            si = st.selectbox("Site", [4, 8, 16, 32], index=1, key=f"si_{i}", disabled=not is_enabled)
-            tt_val = st.number_input("Test Time (s)", value=stage['tt'], key=f"tt_{i}", disabled=not is_enabled)
-            fpy_val = st.number_input("FPY %", value=stage['fpy'], key=f"fy_{i}", disabled=not is_enabled)
-            oee_val = st.number_input("OEE %", value=70.0, key=f"oe_{i}", disabled=not is_enabled)
+            # 第一排：數量與站點 (下限鎖死 0，Site 還原為全備 1~16 下拉選單)
+            p_c1, p_c2 = st.columns(2)
+            with p_c1:
+                ls = st.number_input("Lot Size", min_value=0, value=6600, step=100, key=f"ls_{i}", disabled=not is_enabled)
+            with p_c2:
+                si = st.selectbox("Site", options=list(range(1, 17)), index=7, key=f"si_{i}", disabled=not is_enabled)
+                
+            # 第二排：時間變數 (下限鎖死 0.00)
+            p_c3, p_c4 = st.columns(2)
+            with p_c3:
+                tt_val = st.number_input("Test Time (s)", min_value=0.00, value=stage['tt'], step=1.00, format="%.2f", key=f"tt_{i}", disabled=not is_enabled)
+            with p_c4:
+                op_val = st.number_input("OP Time (min)", min_value=0.00, value=stage['op'], step=5.0, key=f"op_{i}", disabled=not is_enabled)
+                
+            # 第三排：效率變數 (嚴格防呆：下限 0.00，上限鎖死 100.00)
+            p_c5, p_c6 = st.columns(2)
+            with p_c5:
+                fpy_val = st.number_input("FPY %", min_value=0.00, max_value=100.00, value=stage['fpy'], step=1.00, format="%.2f", key=f"fy_{i}", disabled=not is_enabled)
+            with p_c6:
+                oee_val = st.number_input("OEE %", min_value=0.00, max_value=100.00, value=70.00, step=1.00, format="%.2f", key=f"oe_{i}", disabled=not is_enabled)
+
+            if is_enabled:
+                # 執行內嵌專用的動態運算
+                res_embedded = calculate_metrics(daily_target_units, ls, si, tt_val, fpy_val, oee_val, op_val)
+                
+                # 嵌入極簡大字體 26px 產能結果卡片
+                st.markdown(f"""
+                    <div style='background-color: #f8f9fa; padding: 12px 10px; border-radius: 6px; margin-top: 10px; margin-bottom: 15px; border: 1px solid #dee2e6; text-align: center;'>
+                        <div style='font-size: 11px; color: #475569; font-weight: bold; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px;'>
+                            Normalized Output
+                        </div>
+                        <div style='display: flex; justify-content: space-between; align-items: center;'>
+                            <div style='flex: 1;'>
+                                <div style='font-size: 10px; color: #6c757d; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;'>
+                                    Daily Capacity (UPD)
+                                </div>
+                                <div style='font-size: 26px; color: #1E3A8A; font-weight: bold; line-height: 1;'>
+                                    {res_embedded['upd']:,.0f} <span style='font-size: 12px; color: #64748b; font-weight: normal;'>
+                                </div>
+                            </div>
+                            <div style='width: 1px; background-color: #dee2e6; height: 36px;'></div>
+                            <div style='flex: 1;'>
+                                <div style='font-size: 10px; color: #6c757d; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;'>
+                                    Hourly Capacity  (UPH)
+                                </div>
+                                <div style='font-size: 26px; color: #1E3A8A; font-weight: bold; line-height: 1;'>
+                                    {res_embedded['uph']:,.0f} <span style='font-size: 12px; color: #64748b; font-weight: normal;'>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                """, unsafe_allow_html=True)
+
+                # 嵌入 Google Sans 清爽渲染對帳表 (絕對靠右與小數點對齊)
+                st.caption("Verification Table")
+                font_family = "'Google Sans', 'Roboto', -apple-system, sans-serif"
+                val_style = f"text-align: right; padding: 5px 8px; color: #334155; font-family: {font_family}; font-size: 13px;"
+                label_style = f"text-align: left; padding: 5px 8px; color: #475569; font-family: {font_family}; font-size: 13px;"
+                border_style = "border-bottom: 1px solid #e2e8f0;"
+                
+                table_html = f"""
+                <table style="width:100%; border-collapse: collapse; font-family: {font_family};">
+                  <tr style="border-bottom: 2px solid #cbd5e1; background-color: #f8fafc;">
+                    <th style="{label_style} font-weight: 600;">Metric</th>
+                    <th style="{val_style} font-weight: 600;">Value</th>
+                  </tr>
+                  <tr style="{border_style}">
+                    <td style="{label_style}">TD</td>
+                    <td style="{val_style}">{res_embedded['td']:,.2f}</td>
+                  </tr>
+                  <tr style="{border_style}">
+                    <td style="{label_style}">R0 (min)</td>
+                    <td style="{val_style}">{res_embedded['r0']:,.2f}</td>
+                  </tr>
+                  <tr style="{border_style}">
+                    <td style="{label_style}">RT Cycle (min)</td>
+                    <td style="{val_style}">{res_embedded['rt']:,.2f}</td>
+                  </tr>
+                  <tr style="{border_style}">
+                    <td style="{label_style}">Sum Cycle (min)</td>
+                    <td style="{val_style}">{res_embedded['sum_mins']:,.2f}</td>
+                  </tr>
+                  <tr>
+                    <td style="{label_style}">Lots / Day</td>
+                    <td style="{val_style}">{res_embedded['lots_day']:,.2f}</td>
+                  </tr>
+                </table>
+                """
+                st.markdown(table_html, unsafe_allow_html=True)
         
         if is_enabled:
             prev_out_qty = ship_qty * (fpy_val / 100.0)
-            res = calculate_metrics(daily_target_units, ls, si, tt_val, fpy_val, oee_val)
+            res = calculate_metrics(daily_target_units, ls, si, tt_val, fpy_val, oee_val, op_val)
             
             st.markdown(f"""
                 <div style='background-color: #eef4ff; padding: 16px; border-radius: 8px; margin-bottom: 16px; color: #004280; font-size: 14px;'>
