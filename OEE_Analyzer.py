@@ -1398,7 +1398,7 @@ with main_tabs[0]:
                 <div style='display: flex; justify-content: space-between; align-items: center;'>
                     <div style='flex: 1;'>
                         <div style='font-size: 10px; color: #6c757d; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;'>
-                            Daily Capacity
+                            Daily Capacity (UPD)
                         </div>
                         <div style='font-size: 26px; color: #1E3A8A; font-weight: bold; line-height: 1;'>
                             {single_cap:,.0f} <span style='font-size: 11px; color: #64748b; font-weight: normal;'>
@@ -1407,7 +1407,7 @@ with main_tabs[0]:
                     <div style='width: 1px; background-color: #dee2e6; height: 30px;'></div>
                     <div style='flex: 1;'>
                         <div style='font-size: 10px; color: #6c757d; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;'>
-                            Hourly Capacity
+                            Hourly Capacity (UPH)
                         </div>
                         <div style='font-size: 26px; color: #1E3A8A; font-weight: bold; line-height: 1;'>
                             {uph_cap:,.0f} <span style='font-size: 11px; color: #64748b; font-weight: normal;'>
