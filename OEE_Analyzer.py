@@ -1401,7 +1401,7 @@ with main_tabs[0]:
                             Daily Capacity
                         </div>
                         <div style='font-size: 26px; color: #1E3A8A; font-weight: bold; line-height: 1;'>
-                            {single_cap:,.0f} <span style='font-size: 11px; color: #64748b; font-weight: normal;'>/day</span>
+                            {single_cap:,.0f} <span style='font-size: 11px; color: #64748b; font-weight: normal;'>
                         </div>
                     </div>
                     <div style='width: 1px; background-color: #dee2e6; height: 30px;'></div>
@@ -1410,7 +1410,7 @@ with main_tabs[0]:
                             Hourly Capacity
                         </div>
                         <div style='font-size: 26px; color: #1E3A8A; font-weight: bold; line-height: 1;'>
-                            {uph_cap:,.0f} <span style='font-size: 11px; color: #64748b; font-weight: normal;'>/hr</span>
+                            {uph_cap:,.0f} <span style='font-size: 11px; color: #64748b; font-weight: normal;'>
                         </div>
                     </div>
                 </div>
