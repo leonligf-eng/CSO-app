@@ -278,7 +278,7 @@ def render_dashboard():
     col_t, col_btn = st.columns([4, 1])
     with col_t:
         filter_mode = st.session_state.get('nav_filter', 'all')
-        title_map = {'all': "T-PASS Overview", 'my_tasks': "My Action Items", 'watchlist': "My Watchlist"}
+        title_map = {'all': "T-PASS (Test Program Approval & Sign-off System)", 'my_tasks': "My Action Items", 'watchlist': "My Watchlist"}
         st.title(title_map[filter_mode])
     with col_btn:
         st.write(""); st.write("")
