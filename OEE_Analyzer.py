@@ -563,13 +563,17 @@ def safe_sum_cols(df, cols):
 # ==============================================================================
 # --- 🌟 核心防護網：檔案變更與全面狀態清理 (File Change Detector) ---
 # ==============================================================================
-st.sidebar.markdown("## 📂 OSAT Yield Report Inputs")
-uploaded_file = st.sidebar.file_uploader("Upload Yield Report", type=["xlsx", "xls", "ods"], key="ie_uploader")
+st.sidebar.header("📁 Data Upload Center")
 
-# 🌟 新增： OSAT 上傳區塊
-st.sidebar.divider()
-st.sidebar.markdown("## 🏭 OSAT PP Report Inputs")
-osat_uploaded_file = st.sidebar.file_uploader("Upload PP Output (Daily XOEE & Details)", type=["xlsx", "xls"], key="osat_uploader")
+# 收納 1: Yield Report (預設展開，驅動 Tab 1 & Tab 2)
+with st.sidebar.expander("📊 OSAT Yield Report Inputs", expanded=True):
+    st.markdown("<p style='font-size: 12px; color: #666; margin-bottom: 5px;'>For <b>OEE Analyzer</b> & <b>Build Yield</b></p>", unsafe_allow_html=True)
+    uploaded_file = st.file_uploader("Upload Yield Report", type=["xlsx", "xls", "ods"], key="ie_uploader", label_visibility="collapsed")
+
+# 收納 2: PP Report (預設收合，驅動 Tab 3)
+with st.sidebar.expander("🏭 OSAT PP Report Inputs", expanded=False):
+    st.markdown("<p style='font-size: 12px; color: #666; margin-bottom: 5px;'>For <b>OSAT OEE Monitor</b></p>", unsafe_allow_html=True)
+    osat_uploaded_file = st.file_uploader("Upload PP Output (Daily XOEE & Details)", type=["xlsx", "xls"], key="osat_uploader", label_visibility="collapsed")
 
 # 判定目前是真實檔案還是假資料
 current_file_name = uploaded_file.name if uploaded_file is not None else "mock_data"
@@ -614,7 +618,11 @@ st.sidebar.divider()
 # ==============================================================================
 # --- 頂層架構切分 (Main Tabs) ---
 # ==============================================================================
-main_tabs = st.tabs(["📊 OEE Analyzer", "🧬 Overall Build Yield", "🏭 OSAT OEE Monitor"])
+main_tabs = st.tabs(["📊 OEE & Capacity Analytics", "🧬 Overall Build Yield"])
+
+with main_tabs[0]:
+    oee_expander = st.expander("📊 ATE OEE Analyzer", expanded=True)
+    osat_expander = st.expander("🏭 OSAT OEE Monitor", expanded=False)
 
 # ==============================================================================
 # --- 🧬 Tab 2: Overall Build Yield Tracking ---
@@ -1157,10 +1165,11 @@ with main_tabs[1]:
                 html_out += '</tbody></table></div>'
                 st.write(html_out, unsafe_allow_html=True)
 
+
 # ==============================================================================
-# --- 📊 Tab 1: OEE Analyzer ---
+# --- 📊 Tab 1: OEE Analyzer (OEE 分析區域) ---
 # ==============================================================================
-with main_tabs[0]:
+with oee_expander:
     # ==============================================================================
     # --- 1. Main Area: Filters & Help Section ---
     # ==============================================================================
@@ -1473,7 +1482,7 @@ with main_tabs[0]:
 # ==============================================================================
 # --- 🏭 Tab 3: OSAT OEE Monitor Execution Section (Bypasses bottom st.stop) ---
 # ==============================================================================
-with main_tabs[2]:
+with osat_expander:
     st.markdown("## 🏭 OSAT OEE Review Dashboard")
     st.caption("Cross-validating equipment efficiency using internal expected output and OSAT reported data.")
     
@@ -1851,9 +1860,9 @@ with main_tabs[2]:
                 st.info("No data available for the selected filters.")
 
 # ==============================================================================
-# --- 📊 返回 Tab 1 剩餘執行區段 (含 st.stop 防呆) ---
+# --- 📊 返回 OEE Analyzer 剩餘執行區段 (含 st.stop 防呆) ---
 # ==============================================================================
-with main_tabs[0]:
+with oee_expander:
     # ⚠️ 這裡完整保留您的 st.stop()
     if not selected_ops or not selected_progs or not selected_prods:
         st.info("👆 Please select **OpNo, ProgramName, and ProductNo** above to generate the report.")
