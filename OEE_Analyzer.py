@@ -1555,7 +1555,7 @@ with osat_expander:
             else:
                 sub_col1, sub_col2, sub_col3 = st.columns([1, 1, 1])
                 with sub_col1:
-                    std_uph = st.number_input("3. Standard UPH", min_value=1, value=1000, step=100)
+                    std_uph = st.number_input("3. Standard UPH", min_value=1, value=500, step=100)
                 with sub_col2:
                     local_target_oee = st.number_input("4. Target OEE %", min_value=0.0, max_value=100.0, value=85.0, step=1.0)
                     
