@@ -1509,7 +1509,8 @@ with osat_expander:
                     op_upper = str(op).upper()
                     if op_upper.startswith("SLT") or op_upper.startswith("MT"):
                         category_mapping["SLT"].append(op)
-                    elif op_upper.startswith("FT") and "CHECK" not in op_upper:
+                    # 🌟 加上 EQC 開頭的判斷，讓它順利歸類到 ATE 群組
+                    elif (op_upper.startswith("FT") or op_upper.startswith("EQC")) and "CHECK" not in op_upper:
                         category_mapping["ATE"].append(op)
                     else:
                         category_mapping["AOI (Backend/Insp.)"].append(op)
